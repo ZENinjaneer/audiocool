@@ -368,7 +368,8 @@
   // ---------------------------------------------------------------------------------------
   // Session
 
-  const LEAD_IN_MS = 3000;
+  const LEAD_IN_MS = 3000; // a note plays from a little before it, like on the phone
+  const LINE_LEAD_MS = 150; // a transcript line starts a hair early so its first word is heard whole
   const audio = $('#audio');
 
   routes.session = async (el, r) => {
@@ -696,7 +697,7 @@
         if (!line || editing) return;
         const i = Number(line.dataset.i);
         if (e.target.closest('.edit-btn')) { startEdit(line, i); return; }
-        seekTo(segs()[i].s, true);
+        seekTo(Math.max(0, segs()[i].s - LINE_LEAD_MS), true);
       };
       box.ondblclick = (e) => {
         const line = e.target.closest('.line');
@@ -745,7 +746,7 @@
     function markActive(pos, force = false) {
       const lines = segs();
       let i = -1, lo = 0, hi = lines.length - 1;
-      while (lo <= hi) { const mid = (lo + hi) >> 1; if (lines[mid].s <= pos + 50) { i = mid; lo = mid + 1; } else hi = mid - 1; }
+      while (lo <= hi) { const mid = (lo + hi) >> 1; if (lines[mid].s <= pos + LINE_LEAD_MS + 50) { i = mid; lo = mid + 1; } else hi = mid - 1; }
       if (i >= 0 && pos > lines[i].e + 1500 && (i + 1 >= lines.length || pos < lines[i + 1].s)) i = -1; // in a long pause
       if (i !== activeLine || force) {
         const box = $('#transcript', el);
@@ -880,7 +881,9 @@
       if (t != null && rec() && recInfo().hasAudio) {
         follow = true;
         const f = $('#follow', el); if (f) f.checked = true;
-        seekTo(Number(t), true);
+        const note = noteId && s().notes.find((n) => n.id === noteId && n.recId === rec().id && n.offsetMs != null);
+        if (note) playNote(note); // from just before the note, as when clicking it
+        else seekTo(Math.max(0, Number(t) - LINE_LEAD_MS), true);
         setTimeout(() => scrollToActive(true), 150);
       }
     }

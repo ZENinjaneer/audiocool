@@ -167,6 +167,12 @@ also reconciles numbers ("1900s" vs "nineteen hundreds", "CO2" vs "co two"), the
 | | **all three** | 59.8 min | **5.51 %** | **2.77 %** | 8.5 s | **424x** (RTF 0.0024) |
 | Parakeet TDT 0.6B v3 (CPU, 24 threads) | Aimee Mullins | 20.8 min | 4.04 % | 2.42 % | 30.4 s | 41x (RTF 0.024) |
 
+**Timing.** Against a recording with known speech boundaries (21 LibriSpeech utterances joined
+with pauses), the first word of each utterance starts within a median of 20 ms of the speech
+onset (Qwen3 aligner: −20 ms, Parakeet: +7 ms) and the last word ends within a median of 42/21 ms
+of the offset; 90 % are within 0.4 s. (In the web UI a clicked line plays
+from 150 ms before its start so the first word is heard whole; the stored times are exact.)
+
 So an hour-long lecture takes about 40 s with Qwen3-ASR, under 10 s with Parakeet on the GPU and
 about 1.5 min on the CPU. End to end through the phone API (`tools/fake_phone.py`), a 60-minute
 recording (44 MB .m4a) uploaded in 0.3 s and its Qwen3-ASR job finished in 36 s including loading
