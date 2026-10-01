@@ -177,6 +177,7 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
     var tab by rememberSaveable(session.id) { mutableIntStateOf(initialTab) }
     // Recordings waiting on the user to OK the one-time model download.
     var awaitingDownload by remember { mutableStateOf<List<String>?>(null) }
+    var confirmLiveDownload by remember { mutableStateOf(false) }
 
     LaunchedEffect(rec.error) {
         rec.error?.let {
@@ -369,6 +370,8 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
                         recordingHere -> RecordingControls(
                             rec,
                             liveLine = session.recording(rec.recId)?.transcript?.lastOrNull()?.text,
+                            transcription = transcription,
+                            onDownloadModel = { confirmLiveDownload = true },
                         )
                         recordingElsewhere -> Text(
                             "Recording in another session. Stop it there to record or play here.",
@@ -443,6 +446,16 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
             onDismiss = { awaitingDownload = null },
         )
     }
+    if (confirmLiveDownload) {
+        ModelDownloadDialog(
+            onConfirm = {
+                confirmLiveDownload = false
+                TranscriptionController.downloadModel()
+            },
+            onDismiss = { confirmLiveDownload = false },
+            confirmLabel = "Download",
+        )
+    }
     if (renaming) {
         TextInputDialog(
             title = "Rename session",
@@ -492,7 +505,12 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
 }
 
 @Composable
-private fun RecordingControls(rec: RecorderController.State, liveLine: String?) {
+private fun RecordingControls(
+    rec: RecorderController.State,
+    liveLine: String?,
+    transcription: TranscriptionController.State,
+    onDownloadModel: () -> Unit,
+) {
     val recording = rec.status == RecorderController.Status.RECORDING
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
@@ -537,6 +555,29 @@ private fun RecordingControls(rec: RecorderController.State, liveLine: String?) 
                 onClick = { RecorderController.useExternalMic(true) },
                 label = { Text(external.replaceFirstChar { it.uppercase() }) },
             )
+        }
+    }
+    // Live transcription (and spoken notes) need the speech model; say so here, where it's missed.
+    if (!transcription.modelReady && TranscriptionController.autoTranscribe) {
+        if (transcription.phase == TranscriptionController.Phase.DOWNLOADING_MODEL) {
+            Text(
+                "Downloading the speech model… ${(transcription.progress * 100).toInt()}%. " +
+                    "This recording will be transcribed as soon as it's done.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            LinearProgressIndicator(progress = { transcription.progress }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                Text(
+                    "Live transcription needs the speech model, downloaded once.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onDownloadModel) { Text("Download") }
+            }
         }
     }
     // The latest live-transcribed phrase, so you can see it working without switching tabs.

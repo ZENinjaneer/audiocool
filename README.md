@@ -14,8 +14,10 @@ recording when you started typing it; tap a note to play from just before that m
   takes spoken notes through the phone's mic instead.
 - **Transcription, live:** while you record, each phrase is transcribed on the phone a moment after
   it's spoken (nothing is uploaded), using [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) and
-  NVIDIA Parakeet 0.6B (English), downloaded once (about 660 MB). Each line is timestamped; tap it to
-  play from there. Older recordings can be transcribed (or re-transcribed) in the background.
+  NVIDIA Parakeet 0.6B (English), downloaded once (about 660 MB; the app offers it on the main screen
+  and while recording, and a recording already going is transcribed from its start once it arrives).
+  Each line is timestamped; tap it to play from there. Older recordings can be transcribed (or
+  re-transcribed) in the background.
 - **Noisy and distant speech:** the app finds speech in a noise-filtered copy of the audio (GTCRN),
   which catches far more of it in quiet, echoey or noisy rooms, but Parakeet always hears the original
   recording: every test of feeding it filtered audio made it worse. The recording itself is never altered.

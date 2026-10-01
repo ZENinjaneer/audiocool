@@ -73,6 +73,21 @@ class TranscriptionService : Service() {
     private suspend fun work() {
         acquireWakeLock()
         try {
+            // The model can download during a recording; only transcribing waits for it to end.
+            if (TranscriptionController.needsModel && !SpeechModel.isReady(this)) {
+                val error = try {
+                    ensureModel()
+                    null
+                } catch (e: CancellationException) {
+                    if (!coroutineContext.isActive) throw e
+                    null // the user stopped it
+                } catch (e: Throwable) {
+                    Log.e(TAG, "Model download failed", e)
+                    "Couldn't download the speech model: ${e.message ?: e.javaClass.simpleName}"
+                }
+                TranscriptionController.downloadFinished(error)
+                notifyProgress(force = true)
+            }
             while (true) {
                 // Leave the queue alone while recording; it resumes when the recording stops.
                 if (recording()) break
@@ -107,20 +122,24 @@ class TranscriptionService : Service() {
         }
     }
 
+    private val cancelled = { TranscriptionController.isCancelRequested || !scope.isActive }
+
+    /** Downloads the speech model if it isn't here yet. */
+    private fun ensureModel() {
+        if (SpeechModel.isReady(this)) return
+        TranscriptionController.report(Phase.DOWNLOADING_MODEL, 0f)
+        notifyProgress(force = true)
+        SpeechModel.download(this, cancelled) { done, total ->
+            TranscriptionController.report(Phase.DOWNLOADING_MODEL, done.toFloat() / total)
+            notifyProgress()
+        }
+        TranscriptionController.modelDownloaded()
+        SpeechModel.removeOldModels(this)
+    }
+
     private fun process(job: TranscriptionController.Job) {
         if (SessionRepository.get(job.sessionId)?.recording(job.recId) == null) return
-        val cancelled = { TranscriptionController.isCancelRequested || !scope.isActive }
-
-        if (!SpeechModel.isReady(this)) {
-            TranscriptionController.report(Phase.DOWNLOADING_MODEL, 0f)
-            notifyProgress(force = true)
-            SpeechModel.download(this, cancelled) { done, total ->
-                TranscriptionController.report(Phase.DOWNLOADING_MODEL, done.toFloat() / total)
-                notifyProgress()
-            }
-            TranscriptionController.modelDownloaded()
-            SpeechModel.removeOldModels(this)
-        }
+        ensureModel()
 
         TranscriptionController.report(Phase.TRANSCRIBING, 0f)
         notifyProgress(force = true)

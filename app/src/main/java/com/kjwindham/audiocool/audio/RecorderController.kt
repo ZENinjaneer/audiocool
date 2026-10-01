@@ -64,6 +64,7 @@ object RecorderController {
     private lateinit var app: Context
     @Volatile
     private var recorder: MediaRecorder? = null
+    private var file: File? = null
     private var accumulatedMs = 0L
     private var runStartedAt = 0L
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -113,6 +114,7 @@ object RecorderController {
             return false
         }
         recorder = r
+        this.file = file
         accumulatedMs = 0
         runStartedAt = SystemClock.elapsedRealtime()
         val rec = Recording(id = newId(), file = file.name, createdAt = System.currentTimeMillis(), durationMs = 0)
@@ -164,6 +166,7 @@ object RecorderController {
             r.release()
         }
         recorder = null
+        file = null
         _state.value = State()
         if (st.sessionId != null && st.recId != null) {
             SessionRepository.setRecordingDuration(st.sessionId, st.recId, duration)
@@ -176,6 +179,13 @@ object RecorderController {
     }
 
     fun clearError() = _state.update { it.copy(error = null) }
+
+    /** The speech model just finished downloading: transcribe the recording in progress live, catching up from its start. */
+    fun modelReady() {
+        val st = _state.value
+        val f = file ?: return
+        if (st.status != Status.IDLE && st.sessionId != null && st.recId != null) LiveTranscription.start(app, st.sessionId, st.recId, f)
+    }
 
     /** Records with the plugged-in mic ([external]) or the phone's own; remembered for next time. */
     fun useExternalMic(external: Boolean) {

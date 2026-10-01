@@ -3,6 +3,8 @@ package com.kjwindham.audiocool.transcribe
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import androidx.core.content.ContextCompat
 import com.kjwindham.audiocool.audio.RecorderController
 import com.kjwindham.audiocool.data.SessionRepository
@@ -44,6 +46,11 @@ object TranscriptionController {
 
     @Volatile
     private var cancelRequested = false
+
+    // The user asked for the speech model, e.g. to transcribe the recording in progress live.
+    @Volatile
+    private var wantModel = false
+    private val main = Handler(Looper.getMainLooper())
 
     fun init(context: Context) {
         app = context.applicationContext
@@ -89,10 +96,24 @@ object TranscriptionController {
         startWorker()
     }
 
-    /** A recording just stopped: transcribe it automatically once the model has been set up. */
+    /** A recording just stopped: transcribe it automatically once the model has been set up (or is on its way). */
     fun onRecordingFinished(sessionId: String, recId: String) {
-        if (prefs.autoTranscribe && _state.value.modelReady) enqueue(sessionId, listOf(recId))
+        if (prefs.autoTranscribe && (_state.value.modelReady || wantModel)) enqueue(sessionId, listOf(recId))
     }
+
+    /**
+     * Downloads the speech model now. Unlike transcribing, this doesn't wait for a recording to end:
+     * once it's done, the recording in progress is transcribed live, catching up from its start.
+     */
+    fun downloadModel() {
+        if (_state.value.modelReady) return
+        wantModel = true
+        startWorker()
+    }
+
+    /** Whether something is waiting for the speech model to be downloaded. */
+    internal val needsModel: Boolean
+        get() = _state.value.let { !it.modelReady && (wantModel || it.queue.isNotEmpty() || it.current != null) }
 
     /** Drops the session's queued recordings, and stops the one in progress if it's from this session. */
     fun cancel(sessionId: String) {
@@ -102,17 +123,19 @@ object TranscriptionController {
     }
 
     fun cancelAll() {
+        wantModel = false
         _state.update { it.copy(queue = emptyList()) }
-        if (_state.value.current != null) cancelRequested = true
+        if (_state.value.current != null || _state.value.phase == Phase.DOWNLOADING_MODEL) cancelRequested = true
         save()
     }
 
     /** Starts the background worker if there's work. Safe to call any time, e.g. when the app opens. */
     fun startWorker() {
         val s = _state.value
-        if (s.queue.isEmpty() && s.current == null) return
-        // While recording, the phone's busy enough; RecorderController calls this again when it stops.
-        if (RecorderController.state.value.status != RecorderController.Status.IDLE) return
+        // Transcribing waits while recording (the phone's busy enough; RecorderController calls this
+        // again when it stops), but downloading the model doesn't have to.
+        val idle = RecorderController.state.value.status == RecorderController.Status.IDLE
+        if (!(idle && (s.queue.isNotEmpty() || s.current != null)) && !needsModel) return
         try {
             ContextCompat.startForegroundService(app, Intent(app, TranscriptionService::class.java))
         } catch (e: IllegalStateException) {
@@ -138,7 +161,18 @@ object TranscriptionController {
 
     internal fun report(phase: Phase, progress: Float) = _state.update { it.copy(phase = phase, progress = progress) }
 
-    internal fun modelDownloaded() = _state.update { it.copy(modelReady = true) }
+    internal fun modelDownloaded() {
+        wantModel = false
+        _state.update { it.copy(modelReady = true) }
+        // On the main thread, in step with the recording starting and stopping.
+        main.post { RecorderController.modelReady() }
+    }
+
+    /** A download on its own (not for a queued recording) ended; [error] if it failed. */
+    internal fun downloadFinished(error: String?) {
+        cancelRequested = false
+        _state.update { it.copy(phase = Phase.IDLE, progress = 0f, error = error ?: it.error) }
+    }
 
     internal fun finished(error: String?) {
         cancelRequested = false

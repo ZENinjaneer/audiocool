@@ -11,6 +11,11 @@ class Prefs(context: Context) {
         get() = sp.getInt("lead_in_seconds", 3)
         set(value) = sp.edit { putInt("lead_in_seconds", value) }
 
+    /** "Not now" was chosen on the main screen's offer to download the speech model. */
+    var speechModelOfferDismissed: Boolean
+        get() = sp.getBoolean("speech_model_offer_dismissed", false)
+        set(value) = sp.edit { putBoolean("speech_model_offer_dismissed", value) }
+
     /** Record with a plugged-in mic when there is one, instead of the phone's own. */
     var recordWithExternalMic: Boolean
         get() = sp.getBoolean("record_with_external_mic", false)

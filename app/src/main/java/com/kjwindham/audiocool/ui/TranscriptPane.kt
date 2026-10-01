@@ -382,7 +382,7 @@ fun highlighted(text: String, matches: List<IntRange>): AnnotatedString {
 
 /** Confirms the one-time speech model download before the first transcription. */
 @Composable
-fun ModelDownloadDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+fun ModelDownloadDialog(onConfirm: () -> Unit, onDismiss: () -> Unit, confirmLabel: String = "Download and transcribe") {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Download the speech model?") },
@@ -400,7 +400,7 @@ fun ModelDownloadDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("Download and transcribe") } },
+        confirmButton = { TextButton(onClick = onConfirm) { Text(confirmLabel) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

@@ -16,6 +16,8 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -33,6 +35,7 @@ import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.data.TranscriptSegment
 import com.kjwindham.audiocool.transcribe.TranscriptionController
 import com.kjwindham.audiocool.transcribe.TranscriptionService
+import com.kjwindham.audiocool.util.Prefs
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -80,6 +83,43 @@ class RecordAndNoteFlowTest {
         Dictation.recognizeForTest = null
         ShadowAudioRecord.clearSource()
     }
+
+    @Test
+    fun theMainScreenOffersTheSpeechModelDownload() {
+        compose.onNodeWithText("Set up transcription").assertIsDisplayed()
+        screenshot("8-set-up-transcription")
+        compose.onNodeWithText("Download").performClick()
+        assertTrue(startedTranscriptionService())
+        TranscriptionController.cancelAll()
+
+        // "Not now" puts it away for good.
+        compose.onNodeWithText("Not now").performClick()
+        compose.onNodeWithText("Set up transcription").assertDoesNotExist()
+        assertTrue(Prefs(app).speechModelOfferDismissed)
+    }
+
+    @Test
+    fun theModelCanDownloadMidRecordingAndThenTranscribesThatRecordingLive() {
+        compose.onNodeWithContentDescription("New session").performClick()
+        compose.onNodeWithText("Start recording").performClick()
+        compose.onNodeWithText("Live transcription needs the speech model", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Download").performClick()
+        compose.onNodeWithText("Download the speech model?").assertIsDisplayed()
+        compose.onNode(hasText("Download") and hasAnyAncestor(isDialog())).performClick()
+        // The download starts now; it doesn't wait for the recording to end.
+        assertTrue(startedTranscriptionService())
+
+        // When it's done, live transcription of this recording starts (here it fails at once,
+        // with no speech engine on the test machine, and hands the recording to the queue).
+        val rec = RecorderController.state.value
+        TranscriptionController.modelDownloaded()
+        shadowOf(Looper.getMainLooper()).idle()
+        compose.waitUntil(5_000) { TranscriptionController.state.value.isPending(rec.sessionId!!, rec.recId!!) }
+        compose.onNodeWithText("Live transcription needs the speech model", substring = true).assertDoesNotExist()
+    }
+
+    private fun startedTranscriptionService(): Boolean =
+        generateSequence { shadowOf(app).nextStartedService }.any { it.component?.className == TranscriptionService::class.java.name }
 
     @Test
     fun withAHeadsetPluggedInThePhoneMicKeepsRecordingTheRoom() {

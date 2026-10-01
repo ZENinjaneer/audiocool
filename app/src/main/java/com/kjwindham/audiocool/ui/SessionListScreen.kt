@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -38,11 +39,13 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
@@ -60,6 +63,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -71,7 +75,9 @@ import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.search.HitKind
 import com.kjwindham.audiocool.search.SearchHit
 import com.kjwindham.audiocool.search.searchAll
+import com.kjwindham.audiocool.transcribe.SpeechModel
 import com.kjwindham.audiocool.transcribe.TranscriptionController
+import com.kjwindham.audiocool.util.Prefs
 import com.kjwindham.audiocool.util.defaultSessionTitle
 import com.kjwindham.audiocool.util.formatDate
 import com.kjwindham.audiocool.util.formatTime
@@ -101,7 +107,11 @@ fun SessionListScreen(
     var showDesktop by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
     var confirmModelDownload by remember { mutableStateOf(false) }
+    var confirmLiveDownload by remember { mutableStateOf(false) }
     var autoTranscribe by remember { mutableStateOf(TranscriptionController.autoTranscribe) }
+    val context = LocalContext.current
+    val prefs = remember { Prefs(context) }
+    var offerDismissed by remember { mutableStateOf(prefs.speechModelOfferDismissed) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val sorted = remember(sessions) { sessions.sortedByDescending { it.updatedAt } }
@@ -171,6 +181,10 @@ fun SessionListScreen(
                                     onClick = {
                                         autoTranscribe = !autoTranscribe
                                         TranscriptionController.autoTranscribe = autoTranscribe
+                                        if (autoTranscribe && !transcription.modelReady) {
+                                            showMenu = false
+                                            confirmLiveDownload = true
+                                        }
                                     },
                                 )
                                 DropdownMenuItem(
@@ -242,6 +256,21 @@ fun SessionListScreen(
                     )
                 }
             }
+            // Transcription is on by default but needs a one-time download; offer it up front.
+            val downloading = transcription.phase == TranscriptionController.Phase.DOWNLOADING_MODEL
+            if (!searching && !transcription.modelReady && autoTranscribe && (downloading || !offerDismissed || transcription.error != null)) {
+                item(key = "speech-model") {
+                    SpeechModelCard(
+                        transcription,
+                        onDownload = TranscriptionController::downloadModel,
+                        onDismiss = {
+                            TranscriptionController.clearError()
+                            prefs.speechModelOfferDismissed = true
+                            offerDismissed = true
+                        },
+                    )
+                }
+            }
             if (sorted.isEmpty()) {
                 item(key = "empty") { EmptyState() }
             }
@@ -283,6 +312,16 @@ fun SessionListScreen(
             onDismiss = { confirmModelDownload = false },
         )
     }
+    if (confirmLiveDownload) {
+        ModelDownloadDialog(
+            onConfirm = {
+                confirmLiveDownload = false
+                TranscriptionController.downloadModel()
+            },
+            onDismiss = { confirmLiveDownload = false },
+            confirmLabel = "Download",
+        )
+    }
     if (showDesktop) DesktopDialog(onDismiss = { showDesktop = false })
     if (showAbout) AboutDialog(onDismiss = { showAbout = false })
     if (showBackup) {
@@ -290,6 +329,37 @@ fun SessionListScreen(
             onDismiss = { showBackup = false },
             onMessage = { scope.launch { snackbar.showSnackbar(it) } },
         )
+    }
+}
+
+/** Offers the one-time speech model download, then shows its progress. */
+@Composable
+private fun SpeechModelCard(transcription: TranscriptionController.State, onDownload: () -> Unit, onDismiss: () -> Unit) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (transcription.phase == TranscriptionController.Phase.DOWNLOADING_MODEL) {
+                Text("Downloading the speech model… ${(transcription.progress * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
+                LinearProgressIndicator(progress = { transcription.progress }, modifier = Modifier.fillMaxWidth())
+                Text(
+                    "Once it's done, recordings are transcribed as you record, even one that's already going.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            } else {
+                Text("Set up transcription", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Live transcripts, searching what was said, and spoken notes need the speech model " +
+                        "(${SpeechModel.totalBytes / 1_000_000} MB, downloaded once; use Wi-Fi). It runs on your phone; nothing is uploaded.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                transcription.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                Text("${SpeechModel.LICENSE_NOTICE}.", style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                    TextButton(onClick = onDismiss) { Text("Not now") }
+                    Spacer(Modifier.width(8.dp))
+                    Button(onClick = onDownload) { Text(if (transcription.error != null) "Try again" else "Download") }
+                }
+            }
+        }
     }
 }
 
