@@ -253,6 +253,11 @@ def create_app(app: App, port: int = 8765) -> FastAPI:
         response = await call_next(request)
         if path == "/" or path.startswith("/ui/api/"):
             response.headers.setdefault("Cache-Control", "no-store")
+        # No framing by other sites (clickjacking), no type sniffing, no referrers.
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
         return response
 
     @api.exception_handler(BadInput)

@@ -185,6 +185,9 @@ def test_web_ui_is_local_only(env):
     r = env.client.post("/ui/api/pair/reset")
     assert r.status_code == 403
     assert env.client.post("/ui/api/pair/reset", headers={"X-AudioCool": "1"}).status_code == 200
+    # ...or frame it to steer clicks.
+    page = env.client.get("/")
+    assert page.headers["x-frame-options"] == "DENY" and "frame-ancestors 'none'" in page.headers["content-security-policy"]
 
 
 def test_pair_page_qr_content(env):
