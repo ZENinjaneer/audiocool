@@ -133,6 +133,40 @@ class Engine:
         )
 
 
+def is_oom(exc: BaseException) -> bool:
+    return type(exc).__name__ == "OutOfMemoryError" or "out of memory" in str(exc).lower()
+
+
+class OomSplitter:
+    """Runs batches, halving the batch size whenever the GPU runs out of memory (e.g. because
+    another program is using it), and keeps the smaller size for the rest of the job."""
+
+    def __init__(self) -> None:
+        self.cap: int | None = None
+
+    def run(self, batch: list, fn: Callable[[list], list]) -> list:
+        out: list = []
+        i = 0
+        while i < len(batch):
+            size = len(batch) - i if self.cap is None else min(self.cap, len(batch) - i)
+            sub = batch[i:i + size]
+            try:
+                out.extend(fn(sub))
+                i += size
+            except Exception as e:
+                if not is_oom(e) or size == 1:
+                    raise
+                try:
+                    import torch
+
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+                self.cap = max(1, size // 2)
+                log.warning("Out of GPU memory with %d chunks at once; retrying with %d", size, self.cap)
+        return out
+
+
 def batches_by_length(lengths: list[int], max_items: int, max_total: int) -> list[list[int]]:
     """Groups chunk indices, longest first, so each batch pads little and fits in memory."""
     order = sorted(range(len(lengths)), key=lambda i: -lengths[i])

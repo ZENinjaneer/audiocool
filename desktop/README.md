@@ -168,7 +168,9 @@ also reconciles numbers ("1900s" vs "nineteen hundreds", "CO2" vs "co two"), the
 | Parakeet TDT 0.6B v3 (CPU, 24 threads) | Aimee Mullins | 20.8 min | 4.04 % | 2.42 % | 30.4 s | 41x (RTF 0.024) |
 
 So an hour-long lecture takes about 40 s with Qwen3-ASR, under 10 s with Parakeet on the GPU and
-about 1.5 min on the CPU. Peak GPU memory: 11.5 GB (Qwen3-ASR, batches of 24 × 30 s), 6.1 GB
+about 1.5 min on the CPU. End to end through the phone API (`tools/fake_phone.py`), a 60-minute
+recording (44 MB .m4a) uploaded in 0.3 s and its Qwen3-ASR job finished in 36 s including loading
+the model, giving 583 lines. Peak GPU memory: 11.5 GB (Qwen3-ASR, batches of 24 × 30 s), 6.1 GB
 (Parakeet). Qwen3-ASR also runs on the CPU (the fallback after a GPU failure), but only at about
 real time (11 s clip in 9 s). Reproduce with `./run.sh benchmark --rows 0 1 2`
 (`pip install whisper-normalizer` adds the second WER column).

@@ -12,7 +12,7 @@ import warnings
 
 import numpy as np
 
-from .base import SR, Cancelled, Engine, IsCancelled, Progress, batches_by_length, quiet_transformers
+from .base import SR, Cancelled, Engine, IsCancelled, OomSplitter, Progress, batches_by_length, quiet_transformers
 from .segmenter import Word
 
 log = logging.getLogger(__name__)
@@ -134,18 +134,22 @@ class ParakeetEngine(Engine):
         total = max(sum(lengths), 1)
         done = 0
         results: list[list[Word]] = [[] for _ in chunks]
-        for batch in batches:
-            if cancelled():
-                raise Cancelled()
+        splitter = OomSplitter()
+
+        def run(sub: list[int]) -> list[list[Word]]:
             with torch.inference_mode(), warnings.catch_warnings():
                 # (The transducer stops at the end of the audio; generate's max_length notice doesn't apply.)
                 warnings.filterwarnings("ignore", message=".*max_length.*")
                 # Spectrograms on the GPU too: on the CPU they cost more than the model run.
-                feats, mask = features(self.processor.feature_extractor, [chunks[i] for i in batch], self.device)
+                feats, mask = features(self.processor.feature_extractor, [chunks[i] for i in sub], self.device)
                 out = self.model.generate(input_features=feats.to(self.dtype), attention_mask=mask, return_dict_in_generate=True)
-            words = decode_words(out.sequences, out.durations, self.pieces, self.skip, self.frame_s, [offsets_s[i] for i in batch])
-            for j, i in enumerate(batch):
-                results[i] = words[j]
+            return decode_words(out.sequences, out.durations, self.pieces, self.skip, self.frame_s, [offsets_s[i] for i in sub])
+
+        for batch in batches:
+            if cancelled():
+                raise Cancelled()
+            for i, words in zip(batch, splitter.run(batch, run)):
+                results[i] = words
             done += sum(lengths[i] for i in batch)
             progress(done / total)
         return results

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import threading
 
+import pytest
+
 from audiocool_desktop.engines import ModelSpec, Registry
 from audiocool_desktop.engines.fake import FakeEngine
 from conftest import Env, phone_session, wait_for
@@ -180,6 +182,25 @@ def test_gpu_failure_falls_back_to_cpu(tmp_path):
         assert [e.device for e in made] == ["cuda", "cpu"]
     finally:
         env.close()
+
+
+def test_batches_shrink_when_the_gpu_runs_out_of_memory():
+    from audiocool_desktop.engines.base import OomSplitter
+
+    calls = []
+
+    def fn(sub):
+        calls.append(len(sub))
+        if len(sub) > 3:
+            raise RuntimeError("CUDA out of memory. Tried to allocate 1.5 GiB")
+        return [x * 10 for x in sub]
+
+    s = OomSplitter()
+    assert s.run(list(range(10)), fn) == [x * 10 for x in range(10)]
+    assert calls == [10, 5, 2, 2, 2, 2, 2] and s.cap == 2
+    assert s.run([1, 2, 3], fn) == [10, 20, 30]  # later batches start at the smaller size
+    with pytest.raises(ValueError):
+        OomSplitter().run([1, 2], lambda sub: (_ for _ in ()).throw(ValueError("not memory")))
 
 
 def test_default_registry_offers_three_models():

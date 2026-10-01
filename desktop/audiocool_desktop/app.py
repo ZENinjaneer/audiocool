@@ -79,6 +79,11 @@ class App:
             engine = self.registry.engine(spec.id, device="cpu")
             result = engine.transcribe_file(path, progress, cancelled)
         self.registry.touch()
+        if result.device == "cuda":
+            # Hand the batch buffers back to the driver; other programs may want the GPU too.
+            import torch
+
+            torch.cuda.empty_cache()
         self.library.set_transcript(
             entry.id,
             rec["id"],

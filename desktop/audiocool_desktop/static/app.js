@@ -374,7 +374,14 @@
   routes.session = async (el, r) => {
     const sid = r.args[0];
     el.innerHTML = '<div class="skeleton" style="height:60px"></div><div class="skeleton" style="height:110px"></div><div class="skeleton" style="height:320px"></div>';
-    let data = await api(`/sessions/${encodeURIComponent(sid)}`);
+    let data;
+    try {
+      data = await api(`/sessions/${encodeURIComponent(sid)}`);
+    } catch (e) {
+      el.innerHTML = out(html`<div class="card empty">${icon('alert')}<h2>Session not found</h2>
+        <p>It may have been deleted, or the library folder changed (${e.message}).</p><a class="btn" href="#/">Back to the library</a></div>`);
+      return null;
+    }
     if (!INFO) await loadInfo();
     let recIdx = 0;
     let follow = true;

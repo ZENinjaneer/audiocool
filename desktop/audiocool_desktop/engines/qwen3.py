@@ -13,7 +13,7 @@ import unicodedata
 
 import numpy as np
 
-from .base import SR, Cancelled, Engine, IsCancelled, Progress, batches_by_length, quiet_transformers
+from .base import SR, Cancelled, Engine, IsCancelled, OomSplitter, Progress, batches_by_length, is_oom, quiet_transformers
 from .segmenter import Word
 
 log = logging.getLogger(__name__)
@@ -154,11 +154,13 @@ class Qwen3Engine(Engine):
         total = max(sum(lengths), 1)
         texts: list[str] = [""] * len(chunks)
         done = 0
+        splitter = OomSplitter()
         # Recognition takes most of the time; alignment is a single forward pass per batch.
         for batch in asr_batches:
             if cancelled():
                 raise Cancelled()
-            for i, t in zip(batch, self._transcribe_batch([chunks[i] for i in batch])):
+            out = splitter.run(batch, lambda sub: self._transcribe_batch([chunks[i] for i in sub]))
+            for i, t in zip(batch, out):
                 texts[i] = t
             done += sum(lengths[i] for i in batch)
             progress(0.85 * done / total)
@@ -168,23 +170,22 @@ class Qwen3Engine(Engine):
         todo = [i for i, t in enumerate(texts) if any(_kept(c) for c in t)]
         align_batches = batches_by_length([lengths[i] for i in todo], max_items=24 if gpu else 2, max_total=(24 if gpu else 2) * 30 * SR)
         done = 0
+
+        def align(sub: list[int]) -> list[list[dict]]:
+            try:
+                return self._align_batch([chunks[i] for i in sub], [texts[i] for i in sub])
+            except Exception as e:  # keep the text even if alignment fails
+                if is_oom(e):
+                    raise
+                log.warning("Alignment failed for %d chunks (%s); spreading times evenly", len(sub), e)
+                return [[] for _ in sub]
+
         for batch in align_batches:
             if cancelled():
                 raise Cancelled()
             idx = [todo[k] for k in batch]
-            try:
-                stamps = self._align_batch([chunks[i] for i in idx], [texts[i] for i in idx])
-            except Exception as e:  # keep the text even if alignment fails
-                if is_oom(e):
-                    raise
-                log.warning("Alignment failed for %d chunks (%s); spreading times evenly", len(idx), e)
-                stamps = [[] for _ in idx]
-            for i, st in zip(idx, stamps):
+            for i, st in zip(idx, splitter.run(idx, align)):
                 results[i] = attach_times(texts[i], st, offsets_s[i], lengths[i] / SR)
             done += sum(lengths[i] for i in idx)
             progress(0.85 + 0.15 * done / max(sum(lengths[i] for i in todo), 1))
         return results
-
-
-def is_oom(exc: BaseException) -> bool:
-    return type(exc).__name__ == "OutOfMemoryError" or "out of memory" in str(exc)
