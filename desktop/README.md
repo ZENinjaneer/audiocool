@@ -150,9 +150,11 @@ neighbour (lines are at most 20 s and at least 2 s unless a short phrase stands 
 pauses; the median is 4–6 s on talks). Start and end times come from the first and last word, so
 clicking a line starts right where it was said.
 
-**GPU and fallback.** Only one model is loaded at a time, and it's unloaded after 10 idle minutes.
-If CUDA fails during a job (out of memory, driver error), the job is retried on the CPU and the
-job list says so. Without CUDA, the CPU Parakeet is the default.
+**GPU and fallback.** Only one model is loaded at a time, and it's unloaded after 10 idle minutes;
+cached GPU memory is handed back after every job. If the GPU runs out of memory (say another
+program holds most of it), the batch is halved and retried, down to one chunk at a time; if CUDA
+still fails (or the driver errors), the job is retried on the CPU and the job list says so.
+Without CUDA, the CPU Parakeet is the default.
 
 ### Measured speed and accuracy
 
@@ -219,8 +221,9 @@ adapters, the one with the default route first.
                "recordings": [{"id": "r1", "durationMs": 3600000, "transcribed": true, "model": "qwen3-asr-1.7b"}]}]}
 ```
 
-`transcribed`/`model` describe the desktop's own transcript of that recording (a transcript that
-came from the phone doesn't count).
+`transcribed`/`model` describe the transcript the desktop holds as its own: one it made, or a phone
+transcript corrected in the web UI (then `model` is the phone's model id). A transcript that came
+from the phone unchanged doesn't count.
 
 **`PUT /api/v1/sessions/{id}`** — body `{"session": <session.json>, "files": {"recording-1.m4a": <bytes>, ...}}`.
 Stores or updates the session and answers `{"needed": ["recording-1.m4a"]}`: the files listed in
