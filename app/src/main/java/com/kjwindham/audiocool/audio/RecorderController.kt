@@ -8,6 +8,7 @@ import android.os.SystemClock
 import com.kjwindham.audiocool.data.Recording
 import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.data.newId
+import com.kjwindham.audiocool.transcribe.LiveTranscription
 import com.kjwindham.audiocool.transcribe.TranscriptionController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -98,6 +99,7 @@ object RecorderController {
         _state.value = State(Status.RECORDING, sessionId, rec.id)
         startTicker()
         RecordingService.start(app)
+        LiveTranscription.start(app, sessionId, rec.id, file)
         return true
     }
 
@@ -137,12 +139,15 @@ object RecorderController {
             r.release()
         }
         recorder = null
+        _state.value = State()
         if (st.sessionId != null && st.recId != null) {
             SessionRepository.setRecordingDuration(st.sessionId, st.recId, duration)
             SessionRepository.convertToM4a(st.sessionId, st.recId)
-            TranscriptionController.onRecordingFinished(st.sessionId, st.recId)
+            // If it was transcribed live, that finishes up on its own; otherwise queue it now.
+            if (!LiveTranscription.recordingStopped(st.recId)) TranscriptionController.onRecordingFinished(st.sessionId, st.recId)
         }
-        _state.value = State()
+        // Background transcription waits while recording; let it continue.
+        TranscriptionController.startWorker()
     }
 
     fun clearError() = _state.update { it.copy(error = null) }

@@ -58,8 +58,8 @@ android {
         applicationId = "com.kjwindham.audiocool"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
         // The speech engine is native code; ship only the 64-bit ARM build every current phone uses.
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -127,6 +127,13 @@ tasks.withType<Test>().configureEach {
         systemProperty("sherpa.host.dir", dir)
         systemProperty("java.library.path", "$dir/lib")
     }
+    // Model comparison (ModelBenchmarkHostTest): -PasrBenchDir=<test set> -PasrBenchModels=type:dir,...
+    providers.gradleProperty("asrBenchDir").orNull?.let { systemProperty("asr.bench.dir", it) }
+    providers.gradleProperty("asrBenchModels").orNull?.let { systemProperty("asr.bench.models", it) }
+    providers.gradleProperty("asrBenchThreads").orNull?.let { systemProperty("asr.bench.threads", it) }
+    providers.gradleProperty("asrBenchLeveling").orNull?.let { systemProperty("asr.bench.leveling", it) }
+    providers.gradleProperty("asrBenchMaxSegment").orNull?.let { systemProperty("asr.bench.maxSegment", it) }
+    maxHeapSize = "4g"
 }
 
 dependencies {
@@ -139,6 +146,8 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.documentfile:documentfile:1.0.1")
+    // Scans the desktop's pairing QR code with Google's scanner (no camera permission needed).
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation(files(sherpaAar))
 
@@ -150,4 +159,8 @@ dependencies {
     testImplementation("androidx.test:core-ktx:1.6.1")
     testImplementation("androidx.test.ext:junit:1.2.1")
     testImplementation("androidx.compose.ui:ui-test-junit4")
+    // Hosts single composables (createAndroidComposeRule<ComponentActivity>) in tests.
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
+    // A fake AudioCool Desktop for testing the phone's client.
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }

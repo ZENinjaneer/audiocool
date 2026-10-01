@@ -98,6 +98,7 @@ fun SessionListScreen(
     var searching by rememberSaveable { mutableStateOf(query.isNotEmpty()) }
     var showMenu by remember { mutableStateOf(false) }
     var showBackup by remember { mutableStateOf(false) }
+    var showDesktop by remember { mutableStateOf(false) }
     var confirmModelDownload by remember { mutableStateOf(false) }
     var autoTranscribe by remember { mutableStateOf(TranscriptionController.autoTranscribe) }
     val snackbar = remember { SnackbarHostState() }
@@ -164,11 +165,18 @@ fun SessionListScreen(
                                     )
                                 }
                                 DropdownMenuItem(
-                                    text = { Text("Transcribe new recordings automatically") },
+                                    text = { Text("Transcribe while recording") },
                                     trailingIcon = { if (autoTranscribe) Icon(Icons.Filled.Check, contentDescription = "On") },
                                     onClick = {
                                         autoTranscribe = !autoTranscribe
                                         TranscriptionController.autoTranscribe = autoTranscribe
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Desktop transcription") },
+                                    onClick = {
+                                        showMenu = false
+                                        showDesktop = true
                                     },
                                 )
                                 DropdownMenuItem(
@@ -267,6 +275,7 @@ fun SessionListScreen(
             onDismiss = { confirmModelDownload = false },
         )
     }
+    if (showDesktop) DesktopDialog(onDismiss = { showDesktop = false })
     if (showBackup) {
         BackupDialog(
             onDismiss = { showBackup = false },

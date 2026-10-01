@@ -108,7 +108,9 @@ import com.kjwindham.audiocool.data.TranscriptSegment
 import com.kjwindham.audiocool.data.NoteFocus
 import com.kjwindham.audiocool.data.highlightedNoteId
 import com.kjwindham.audiocool.data.newId
+import com.kjwindham.audiocool.desktop.DesktopSync
 import com.kjwindham.audiocool.data.playbackStartFor
+import com.kjwindham.audiocool.transcribe.LiveTranscription
 import com.kjwindham.audiocool.transcribe.TranscriptionController
 import com.kjwindham.audiocool.util.Prefs
 import com.kjwindham.audiocool.util.formatTime
@@ -130,6 +132,9 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
     val rec by RecorderController.state.collectAsStateWithLifecycle()
     val player by PlayerController.state.collectAsStateWithLifecycle()
     val transcription by TranscriptionController.state.collectAsStateWithLifecycle()
+    val live by LiveTranscription.state.collectAsStateWithLifecycle()
+    val desktop by DesktopSync.pairing.collectAsStateWithLifecycle()
+    val desktopProgress by DesktopSync.progress.collectAsStateWithLifecycle()
     val prefs = remember { Prefs(context) }
     var leadInSec by remember { mutableIntStateOf(prefs.leadInSeconds) }
     val snackbar = remember { SnackbarHostState() }
@@ -155,7 +160,8 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
     var pickLeadIn by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Note?>(null) }
     var tab by rememberSaveable(session.id) { mutableIntStateOf(initialTab) }
-    var confirmModelDownload by remember { mutableStateOf(false) }
+    // Recordings waiting on the user to OK the one-time model download.
+    var awaitingDownload by remember { mutableStateOf<List<String>?>(null) }
 
     LaunchedEffect(rec.error) {
         rec.error?.let {
@@ -263,9 +269,9 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
 
     fun ensureLoaded(): Boolean = selected != null && PlayerController.load(session.id, selected)
 
-    fun transcribeSession() {
-        val ids = session.recordings.filter { it.durationMs > 0 && it.transcript == null }.map { it.id }
-        if (ids.isNotEmpty()) TranscriptionController.enqueue(session.id, ids)
+    fun transcribe(ids: List<String>) {
+        if (ids.isEmpty()) return
+        if (transcription.modelReady) TranscriptionController.enqueue(session.id, ids) else awaitingDownload = ids
     }
 
     fun playSegment(recording: Recording, segment: TranscriptSegment) {
@@ -303,6 +309,17 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
                                 showMenu = false
                                 renaming = true
                             })
+                            if (desktop != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Transcribe on desktop") },
+                                    enabled = !recordingHere && session.recordings.any { it.durationMs > 0 },
+                                    onClick = {
+                                        showMenu = false
+                                        tab = 1
+                                        DesktopSync.send(session.id)
+                                    },
+                                )
+                            }
                             DropdownMenuItem(text = { Text("Tap a note: start ${leadInSec}s before") }, onClick = {
                                 showMenu = false
                                 pickLeadIn = true
@@ -326,7 +343,10 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
             Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                     when {
-                        recordingHere -> RecordingControls(rec)
+                        recordingHere -> RecordingControls(
+                            rec,
+                            liveLine = session.recording(rec.recId)?.transcript?.lastOrNull()?.text,
+                        )
                         recordingElsewhere -> Text(
                             "Recording in another session. Stop it there to record or play here.",
                             style = MaterialTheme.typography.bodyMedium,
@@ -363,8 +383,11 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
                     session = session,
                     player = player,
                     transcription = transcription,
+                    live = live,
+                    desktopProgress = desktopProgress[session.id],
                     recordingHere = recordingHere,
-                    onTranscribe = { if (transcription.modelReady) transcribeSession() else confirmModelDownload = true },
+                    onTranscribe = { transcribe(session.recordings.filter { it.durationMs > 0 && it.transcript == null }.map { it.id }) },
+                    onRetranscribe = ::transcribe,
                     onPlay = ::playSegment,
                     modifier = Modifier.weight(1f),
                 )
@@ -380,13 +403,13 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
         }
     }
 
-    if (confirmModelDownload) {
+    awaitingDownload?.let { ids ->
         ModelDownloadDialog(
             onConfirm = {
-                confirmModelDownload = false
-                transcribeSession()
+                awaitingDownload = null
+                TranscriptionController.enqueue(session.id, ids)
             },
-            onDismiss = { confirmModelDownload = false },
+            onDismiss = { awaitingDownload = null },
         )
     }
     if (renaming) {
@@ -438,7 +461,7 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
 }
 
 @Composable
-private fun RecordingControls(rec: RecorderController.State) {
+private fun RecordingControls(rec: RecorderController.State, liveLine: String?) {
     val recording = rec.status == RecorderController.Status.RECORDING
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
@@ -471,6 +494,17 @@ private fun RecordingControls(rec: RecorderController.State) {
     }
     Spacer(Modifier.height(10.dp))
     LinearProgressIndicator(progress = { rec.level }, modifier = Modifier.fillMaxWidth())
+    // The latest live-transcribed phrase, so you can see it working without switching tabs.
+    if (liveLine != null) {
+        Text(
+            liveLine,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+    }
 }
 
 @Composable

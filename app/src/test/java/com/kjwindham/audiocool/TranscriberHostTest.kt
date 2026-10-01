@@ -3,6 +3,7 @@ package com.kjwindham.audiocool
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.Vad
 import com.kjwindham.audiocool.transcribe.Resampler
+import com.kjwindham.audiocool.transcribe.SpeechModel
 import com.kjwindham.audiocool.transcribe.Transcriber
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -27,7 +28,7 @@ class TranscriberHostTest {
 
     @Test
     fun transcribesARecordingWithTimestampsWhereTheSpeechIs() {
-        val models = File(hostDir, "models").listFiles().orEmpty().filter { File(it, "encoder_model.ort").exists() }.sorted()
+        val models = File(hostDir, "models").listFiles().orEmpty().filter { it.name.contains(SpeechModel.ID) }
         assumeTrue(models.isNotEmpty())
         for (modelDir in models) {
             val (clip, clipRate) = readWav(File(modelDir, "test_wavs/0.wav"))
@@ -36,7 +37,7 @@ class TranscriberHostTest {
             val audio = FloatArray(2 * 44_100) + clip44 + FloatArray(3 * 44_100) + clip44 + FloatArray(44_100)
             val audioSeconds = audio.size / 44_100.0
 
-            val recognizer = OfflineRecognizer(null, Transcriber.recognizerConfig(modelDir, threads = 4))
+            val recognizer = OfflineRecognizer(null, SpeechModel.recognizerConfig(modelDir, threads = 4))
             val vad = Vad(null, Transcriber.vadConfig(File(hostDir, "silero_vad.onnx").path))
             val started = System.nanoTime()
             // Same path as on the phone: 44.1 kHz chunks -> Resampler -> Transcriber.
@@ -57,15 +58,15 @@ class TranscriberHostTest {
             println("${modelDir.name}: %.1f s of audio in %.2f s (%.0fx real time)".format(audioSeconds, seconds, audioSeconds / seconds))
             segments.forEach { println("  [${it.startMs}-${it.endMs} ms] ${it.text}") }
 
-            assertEquals("one segment per spoken clip in ${modelDir.name}", 2, segments.size)
-            assertTrue(segments[0].text.isNotBlank())
-            // Both clips say the same thing.
-            assertEquals(words(segments[0].text), words(segments[1].text))
-            // Timestamps land where the speech is: after the 2 s lead-in, and after the 3 s pause.
+            // The clip may hold more than one phrase; either way both copies come out the same.
+            assertTrue("an even number of phrases in ${modelDir.name}: $segments", segments.isNotEmpty() && segments.size % 2 == 0)
+            val (first, second) = segments.take(segments.size / 2) to segments.drop(segments.size / 2)
+            assertEquals(words(first.joinToString(" ") { it.text }), words(second.joinToString(" ") { it.text }))
+            // Timestamps land where the speech is: after the 2 s lead-in, and one clip plus the 3 s pause later.
             val clipMs = clip44.size * 1000L / 44_100
-            assertTrue("first starts at ${segments[0].startMs}", segments[0].startMs in 1_900L..2_900L)
-            val secondExpected = 2_000 + clipMs + 3_000
-            assertTrue("second starts at ${segments[1].startMs}, expected ~$secondExpected", segments[1].startMs in (secondExpected - 100)..(secondExpected + 900))
+            assertTrue("first starts at ${first[0].startMs}", first[0].startMs in 1_900L..3_000L)
+            val gap = second[0].startMs - first[0].startMs
+            assertTrue("second copy starts $gap ms after the first, expected ~${clipMs + 3_000}", kotlin.math.abs(gap - (clipMs + 3_000)) <= 150)
             assertTrue(segments.all { it.endMs > it.startMs })
         }
     }

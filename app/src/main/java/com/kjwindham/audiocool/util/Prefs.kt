@@ -25,6 +25,21 @@ class Prefs(context: Context) {
         get() = sp.getString("transcription_queue", "").orEmpty()
         set(value) = sp.edit { putString("transcription_queue", value) }
 
+    /** The recording being transcribed live ("sessionId:recId"), cleared when that finishes. */
+    var liveRecording: String
+        get() = sp.getString("live_recording", "").orEmpty()
+        set(value) = sp.edit { putString("live_recording", value) }
+
+    /** The paired AudioCool Desktop as "url\ntoken\nname", or empty. */
+    var desktopPairing: String
+        get() = sp.getString("desktop_pairing", "").orEmpty()
+        set(value) = sp.edit { putString("desktop_pairing", value) }
+
+    /** Sessions whose desktop transcripts haven't come back yet, comma-separated. */
+    var desktopAwaiting: String
+        get() = sp.getString("desktop_awaiting", "").orEmpty()
+        set(value) = sp.edit { putString("desktop_awaiting", value) }
+
     /** The folder (a Storage Access Framework tree URI) that backups go to, if set. */
     var backupFolder: String?
         get() = sp.getString("backup_folder", null)

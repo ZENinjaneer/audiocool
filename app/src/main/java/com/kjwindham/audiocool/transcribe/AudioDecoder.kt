@@ -57,14 +57,13 @@ class AudioDecoder(private val file: File, private val outRate: Int) {
                     val out = c.outputFormat
                     channels = out.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
                     resampler = Resampler(out.getInteger(MediaFormat.KEY_SAMPLE_RATE), outRate)
-                    floatPcm = out.containsKey(MediaFormat.KEY_PCM_ENCODING) &&
-                        out.getInteger(MediaFormat.KEY_PCM_ENCODING) == AudioFormat.ENCODING_PCM_FLOAT
+                    floatPcm = isFloatPcm(out)
                 } else if (index >= 0) {
                     if (info.size > 0) {
                         val buf = c.getOutputBuffer(index)!!
                         buf.position(info.offset)
                         buf.limit(info.offset + info.size)
-                        val samples = resampler.process(toMono(buf, channels, floatPcm))
+                        val samples = resampler.process(pcmToMono(buf, channels, floatPcm))
                         if (samples.isNotEmpty()) onChunk(samples)
                         if (durationUs > 0) onProgress((info.presentationTimeUs.toFloat() / durationUs).coerceIn(0f, 1f))
                     }
@@ -82,27 +81,32 @@ class AudioDecoder(private val file: File, private val outRate: Int) {
         }
     }
 
-    private fun toMono(buf: ByteBuffer, channels: Int, floatPcm: Boolean): FloatArray {
-        val ordered = buf.slice().order(ByteOrder.nativeOrder())
-        val ch = channels.coerceAtLeast(1)
-        return if (floatPcm) {
-            val fb = ordered.asFloatBuffer()
-            FloatArray(fb.remaining() / ch) { i ->
-                var sum = 0f
-                for (k in 0 until ch) sum += fb.get(i * ch + k)
-                sum / ch
-            }
-        } else {
-            val sb = ordered.asShortBuffer()
-            FloatArray(sb.remaining() / ch) { i ->
-                var sum = 0f
-                for (k in 0 until ch) sum += sb.get(i * ch + k)
-                sum / ch / 32768f
-            }
-        }
-    }
-
     private companion object {
         const val TIMEOUT_US = 10_000L
+    }
+}
+
+internal fun isFloatPcm(format: MediaFormat) =
+    format.containsKey(MediaFormat.KEY_PCM_ENCODING) &&
+        format.getInteger(MediaFormat.KEY_PCM_ENCODING) == AudioFormat.ENCODING_PCM_FLOAT
+
+/** Decoder output (interleaved 16-bit or float PCM) averaged down to mono floats in -1..1. */
+internal fun pcmToMono(buf: ByteBuffer, channels: Int, floatPcm: Boolean): FloatArray {
+    val ordered = buf.slice().order(ByteOrder.nativeOrder())
+    val ch = channels.coerceAtLeast(1)
+    return if (floatPcm) {
+        val fb = ordered.asFloatBuffer()
+        FloatArray(fb.remaining() / ch) { i ->
+            var sum = 0f
+            for (k in 0 until ch) sum += fb.get(i * ch + k)
+            sum / ch
+        }
+    } else {
+        val sb = ordered.asShortBuffer()
+        FloatArray(sb.remaining() / ch) { i ->
+            var sum = 0f
+            for (k in 0 until ch) sum += sb.get(i * ch + k)
+            sum / ch / 32768f
+        }
     }
 }

@@ -17,6 +17,7 @@ object SessionJson {
                     put("file", r.file)
                     put("createdAt", r.createdAt)
                     put("durationMs", r.durationMs)
+                    r.transcriptModel?.let { put("transcriptModel", it) }
                     r.transcript?.let { segments ->
                         put("transcript", JSONArray().apply {
                             segments.forEach { put(JSONObject().put("s", it.startMs).put("e", it.endMs).put("t", it.text)) }
@@ -56,6 +57,7 @@ object SessionJson {
                     file = r.getString("file"),
                     createdAt = r.optLong("createdAt"),
                     durationMs = r.optLong("durationMs"),
+                    transcriptModel = if (r.has("transcriptModel")) r.getString("transcriptModel") else null,
                     transcript = r.optJSONArray("transcript")?.let { a ->
                         List(a.length()) { j ->
                             val t = a.getJSONObject(j)

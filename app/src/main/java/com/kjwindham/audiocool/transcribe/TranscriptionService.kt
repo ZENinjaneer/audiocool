@@ -18,6 +18,7 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.Vad
 import com.kjwindham.audiocool.MainActivity
 import com.kjwindham.audiocool.R
+import com.kjwindham.audiocool.audio.RecorderController
 import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.transcribe.TranscriptionController.Phase
 import kotlinx.coroutines.CoroutineScope
@@ -72,6 +73,8 @@ class TranscriptionService : Service() {
         acquireWakeLock()
         try {
             while (true) {
+                // Leave the queue alone while recording; it resumes when the recording stops.
+                if (recording()) break
                 val job = TranscriptionController.takeNext() ?: break
                 val error = try {
                     process(job)
@@ -93,7 +96,7 @@ class TranscriptionService : Service() {
             withContext(NonCancellable + Dispatchers.Main) {
                 // Something may have been queued while this worker was finishing; its start request
                 // found the worker still running, so pick it up here rather than stopping.
-                if (scope.isActive && TranscriptionController.state.value.queue.isNotEmpty()) {
+                if (scope.isActive && !recording() && TranscriptionController.state.value.queue.isNotEmpty()) {
                     worker = scope.launch { work() }
                 } else {
                     ServiceCompat.stopForeground(this@TranscriptionService, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -104,8 +107,7 @@ class TranscriptionService : Service() {
     }
 
     private fun process(job: TranscriptionController.Job) {
-        val rec = SessionRepository.get(job.sessionId)?.recording(job.recId) ?: return
-        if (rec.durationMs <= 0) return // still recording, or nothing was captured
+        if (SessionRepository.get(job.sessionId)?.recording(job.recId) == null) return
         val cancelled = { TranscriptionController.isCancelRequested || !scope.isActive }
 
         if (!SpeechModel.isReady(this)) {
@@ -116,31 +118,44 @@ class TranscriptionService : Service() {
                 notifyProgress()
             }
             TranscriptionController.modelDownloaded()
+            SpeechModel.removeOldModels(this)
         }
 
         TranscriptionController.report(Phase.TRANSCRIBING, 0f)
         notifyProgress(force = true)
         val engine = recognizer
-            ?: OfflineRecognizer(null, Transcriber.recognizerConfig(SpeechModel.dir(this), THREADS)).also { recognizer = it }
+            ?: OfflineRecognizer(null, SpeechModel.recognizerConfig(this, THREADS)).also { recognizer = it }
         // Look the file up now, not before the (possibly long) model download: by now the recording
         // may have been converted from .aac to .m4a.
         val latest = SessionRepository.get(job.sessionId)?.recording(job.recId) ?: return
         val vad = Vad(assets, Transcriber.vadConfig(VAD_ASSET))
         try {
-            val transcriber = Transcriber(engine, vad)
+            // A job can pick up where live transcription left off: skip what's already transcribed.
+            val transcriber = Transcriber(engine, vad, offsetMs = job.fromMs)
+            var skip = job.fromMs * Transcriber.SAMPLE_RATE / 1000
             AudioDecoder(SessionRepository.audioFile(job.sessionId, latest), Transcriber.SAMPLE_RATE).decode(
                 isCancelled = cancelled,
                 onProgress = {
                     TranscriptionController.report(Phase.TRANSCRIBING, it)
                     notifyProgress()
                 },
-                onChunk = { transcriber.accept(it) },
+                onChunk = { chunk ->
+                    if (skip >= chunk.size) {
+                        skip -= chunk.size
+                    } else {
+                        transcriber.accept(if (skip > 0) chunk.copyOfRange(skip.toInt(), chunk.size) else chunk)
+                        skip = 0
+                    }
+                },
             )
-            SessionRepository.setTranscript(job.sessionId, job.recId, transcriber.finish())
+            val earlier = if (job.fromMs > 0) latest.transcript.orEmpty().filter { it.endMs <= job.fromMs } else emptyList()
+            SessionRepository.setTranscript(job.sessionId, job.recId, earlier + transcriber.finish(), SpeechModel.ID)
         } finally {
             vad.release()
         }
     }
+
+    private fun recording() = RecorderController.state.value.status != RecorderController.Status.IDLE
 
     private fun acquireWakeLock() {
         // A foreground service alone doesn't keep the CPU running once the screen turns off.

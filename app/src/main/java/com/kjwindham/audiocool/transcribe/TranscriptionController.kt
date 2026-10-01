@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import androidx.core.content.ContextCompat
+import com.kjwindham.audiocool.audio.RecorderController
+import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.util.Prefs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,7 +16,8 @@ import kotlinx.coroutines.flow.update
 object TranscriptionController {
     enum class Phase { IDLE, DOWNLOADING_MODEL, TRANSCRIBING }
 
-    data class Job(val sessionId: String, val recId: String)
+    /** Transcribe a recording, from [fromMs] on (earlier parts are already transcribed). */
+    data class Job(val sessionId: String, val recId: String, val fromMs: Long = 0)
 
     data class State(
         val queue: List<Job> = emptyList(),
@@ -25,7 +28,9 @@ object TranscriptionController {
         val modelReady: Boolean = false,
         val error: String? = null,
     ) {
-        fun isPending(sessionId: String, recId: String) = Job(sessionId, recId).let { it == current || it in queue }
+        fun isPending(sessionId: String, recId: String) =
+            (current?.let { it.sessionId == sessionId && it.recId == recId } ?: false) ||
+                queue.any { it.sessionId == sessionId && it.recId == recId }
         fun isBusyWith(sessionId: String) = current?.sessionId == sessionId || queue.any { it.sessionId == sessionId }
     }
 
@@ -44,7 +49,29 @@ object TranscriptionController {
         app = context.applicationContext
         prefs = Prefs(app)
         // The saved queue includes a job that was interrupted, e.g. by the app being killed.
-        _state.value = State(queue = decode(prefs.transcriptionQueue), modelReady = SpeechModel.isReady(app))
+        val queue = decode(prefs.transcriptionQueue).toMutableList()
+        // Live transcription that never finished (the app was killed while recording): pick it up
+        // from where it got to.
+        prefs.liveRecording.split(":").takeIf { it.size == 2 }?.let { (sessionId, recId) ->
+            if (queue.none { it.sessionId == sessionId && it.recId == recId }) {
+                val from = SessionRepository.get(sessionId)?.recording(recId)?.transcript?.lastOrNull()?.endMs ?: 0L
+                queue += Job(sessionId, recId, from)
+            }
+            prefs.liveRecording = ""
+        }
+        _state.value = State(queue = queue, modelReady = SpeechModel.isReady(app))
+        save()
+    }
+
+    /** Transcribe while recording: on when automatic transcription is on and the model is downloaded. */
+    val liveEnabled: Boolean get() = prefs.autoTranscribe && _state.value.modelReady
+
+    internal fun liveStarted(sessionId: String, recId: String) {
+        prefs.liveRecording = "$sessionId:$recId"
+    }
+
+    internal fun liveFinished() {
+        prefs.liveRecording = ""
     }
 
     var autoTranscribe: Boolean
@@ -53,9 +80,9 @@ object TranscriptionController {
             prefs.autoTranscribe = value
         }
 
-    fun enqueue(sessionId: String, recIds: List<String>) {
+    fun enqueue(sessionId: String, recIds: List<String>, fromMs: Long = 0) {
         _state.update { s ->
-            val add = recIds.map { Job(sessionId, it) }.filter { it != s.current && it !in s.queue }
+            val add = recIds.filterNot { s.isPending(sessionId, it) }.map { Job(sessionId, it, fromMs) }
             s.copy(queue = s.queue + add, error = null)
         }
         save()
@@ -84,6 +111,8 @@ object TranscriptionController {
     fun startWorker() {
         val s = _state.value
         if (s.queue.isEmpty() && s.current == null) return
+        // While recording, the phone's busy enough; RecorderController calls this again when it stops.
+        if (RecorderController.state.value.status != RecorderController.Status.IDLE) return
         try {
             ContextCompat.startForegroundService(app, Intent(app, TranscriptionService::class.java))
         } catch (e: IllegalStateException) {
@@ -119,9 +148,12 @@ object TranscriptionController {
 
     private fun save() {
         val s = _state.value
-        prefs.transcriptionQueue = (listOfNotNull(s.current) + s.queue).joinToString(",") { "${it.sessionId}:${it.recId}" }
+        prefs.transcriptionQueue = (listOfNotNull(s.current) + s.queue)
+            .joinToString(",") { "${it.sessionId}:${it.recId}:${it.fromMs}" }
     }
 
-    private fun decode(saved: String): List<Job> =
-        saved.split(",").mapNotNull { entry -> entry.split(":").takeIf { it.size == 2 }?.let { Job(it[0], it[1]) } }
+    private fun decode(saved: String): List<Job> = saved.split(",").mapNotNull { entry ->
+        val parts = entry.split(":")
+        if (parts.size < 2) null else Job(parts[0], parts[1], parts.getOrNull(2)?.toLongOrNull() ?: 0L)
+    }
 }

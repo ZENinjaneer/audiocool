@@ -1,6 +1,9 @@
 package com.kjwindham.audiocool.transcribe
 
 import android.content.Context
+import com.k2fsa.sherpa.onnx.OfflineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
+import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -9,24 +12,55 @@ import java.net.URL
 import java.security.MessageDigest
 import java.util.concurrent.CancellationException
 
-/** The on-device speech model, Moonshine Base v2 (English), downloaded once from Hugging Face. */
+/**
+ * The on-device speech model: NVIDIA Parakeet 0.6B (English, int8), downloaded once from Hugging Face.
+ * In tests on lecture-style audio it made roughly a quarter of the errors of Moonshine Base, which
+ * the app used before, and it doesn't drop long stretches of speech the way Moonshine did.
+ */
 object SpeechModel {
+    const val ID = "parakeet-unified-en-0.6b"
+    const val NAME = "Parakeet 0.6B"
+
     // Pinned to a commit, so the files can't change underneath the checksums below.
     private const val BASE_URL =
-        "https://huggingface.co/csukuangfj2/sherpa-onnx-moonshine-base-en-quantized-2026-02-27/" +
-            "resolve/8f4d6c58c03d40bcea40043bb7120a878f2bbef6"
+        "https://huggingface.co/csukuangfj2/sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming/" +
+            "resolve/8c3a10fb13408c7a7054f6898958bf1c64a8d6c7"
 
     data class ModelFile(val name: String, val size: Long, val sha256: String)
 
     val files = listOf(
-        ModelFile("encoder_model.ort", 31_326_816, "7c66495948d0d08ec1af454cd4b5514862ae6511e94712a60e6d83eaec8dc8cf"),
-        ModelFile("decoder_model_merged.ort", 109_424_400, "d9d7b333af34bc552580576ddcf248a1c6c839e0d3b43b09afb9376ed009899d"),
-        ModelFile("tokens.txt", 549_350, "2870d843e14c1e187bf1913a521562a63b53933814bd7f2145120468f494a049"),
+        ModelFile("encoder.int8.onnx", 654_040_552, "6716910b7a0833997fec7a410494c995d70124001a0e9b66d6370d6aced577e0"),
+        ModelFile("decoder.int8.onnx", 7_257_753, "a5e223392c90e75f8144cdb5eb95af7625db389e39edef2bd1a9c872b3298fe6"),
+        ModelFile("joiner.int8.onnx", 1_735_860, "869f43f7d24595c55581ad3bf249a935fb8a71389fbdaa7504b9f46f93140f8a"),
+        ModelFile("tokens.txt", 8_952, "dc0b4584ab2e4ddbf888425c076c61b736e7356a015250db7d307e6f1a8188ff"),
     )
 
     val totalBytes: Long = files.sumOf { it.size }
 
-    fun dir(context: Context) = File(context.filesDir, "models/moonshine-base-en-v2")
+    /** Models earlier versions downloaded; removed once this one is in place. */
+    private val OLD_MODEL_DIRS = listOf("models/moonshine-base-en-v2")
+
+    fun dir(context: Context) = File(context.filesDir, "models/$ID")
+
+    fun recognizerConfig(context: Context, threads: Int) = recognizerConfig(dir(context), threads)
+
+    /** A NeMo transducer (TDT): encoder, decoder and joiner. */
+    fun recognizerConfig(modelDir: File, threads: Int) = OfflineRecognizerConfig(
+        modelConfig = OfflineModelConfig(
+            transducer = OfflineTransducerModelConfig(
+                encoder = File(modelDir, "encoder.int8.onnx").path,
+                decoder = File(modelDir, "decoder.int8.onnx").path,
+                joiner = File(modelDir, "joiner.int8.onnx").path,
+            ),
+            tokens = File(modelDir, "tokens.txt").path,
+            modelType = "nemo_transducer",
+            numThreads = threads,
+        ),
+    )
+
+    fun removeOldModels(context: Context) {
+        OLD_MODEL_DIRS.forEach { File(context.filesDir, it).deleteRecursively() }
+    }
 
     /** Every file is in place. Checksums were verified when each one was downloaded. */
     fun isReady(context: Context) = files.all { File(dir(context), it.name).length() == it.size }

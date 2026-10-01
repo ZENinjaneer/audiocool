@@ -141,6 +141,12 @@ class RecordAndNoteFlowTest {
         assertEquals(RecordingService::class.java.name, shadowOf(app).nextStartedService.component?.className)
 
         advance(12)
+        // A phrase transcribed live shows up under the recording timer.
+        SessionRepository.appendTranscriptSegment(
+            SessionRepository.sessions.value.single().id, RecorderController.state.value.recId!!,
+            TranscriptSegment(2_000, 9_000, "Welcome to the first lecture."),
+        )
+        compose.onNodeWithText("Welcome to the first lecture.").assertIsDisplayed()
         typeNote("First point")
         compose.onNodeWithText("First point").assertIsDisplayed()
         // The note's timestamp chip, plus the recording timer, which also reads 00:12.

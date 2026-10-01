@@ -13,6 +13,8 @@ data class Recording(
     val durationMs: Long,
     /** What was said, in order; null until the recording has been transcribed. */
     val transcript: List<TranscriptSegment>? = null,
+    /** Which speech model produced [transcript] (phone or desktop), if known. */
+    val transcriptModel: String? = null,
 )
 
 /** A stretch of speech in a recording and the text recognized in it. */

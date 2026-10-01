@@ -82,9 +82,19 @@ object SessionRepository {
         background.launch { convertNow(sessionId, recId) }
     }
 
-    fun setTranscript(sessionId: String, recId: String, transcript: List<TranscriptSegment>) =
+    fun setTranscript(sessionId: String, recId: String, transcript: List<TranscriptSegment>, model: String? = null) =
         update(sessionId, touch = false) { s ->
-            s.copy(recordings = s.recordings.map { if (it.id == recId) it.copy(transcript = transcript) else it })
+            s.copy(recordings = s.recordings.map { if (it.id == recId) it.copy(transcript = transcript, transcriptModel = model) else it })
+        }
+
+    /** Adds one phrase to a recording's transcript (live transcription). */
+    fun appendTranscriptSegment(sessionId: String, recId: String, segment: TranscriptSegment, model: String? = null) =
+        update(sessionId, touch = false) { s ->
+            s.copy(
+                recordings = s.recordings.map {
+                    if (it.id == recId) it.copy(transcript = it.transcript.orEmpty() + segment, transcriptModel = model) else it
+                },
+            )
         }
 
     /** Adds a session restored from a backup; its audio files must already be in [sessionDir]. */

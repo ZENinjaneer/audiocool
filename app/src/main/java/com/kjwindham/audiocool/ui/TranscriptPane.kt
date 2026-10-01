@@ -57,6 +57,8 @@ import com.kjwindham.audiocool.data.Session
 import com.kjwindham.audiocool.data.TranscriptSegment
 import com.kjwindham.audiocool.search.findTerms
 import com.kjwindham.audiocool.search.searchTerms
+import com.kjwindham.audiocool.desktop.DesktopSync
+import com.kjwindham.audiocool.transcribe.LiveTranscription
 import com.kjwindham.audiocool.transcribe.SpeechModel
 import com.kjwindham.audiocool.transcribe.TranscriptionController
 import com.kjwindham.audiocool.util.timeLabel
@@ -79,8 +81,11 @@ fun TranscriptPane(
     session: Session,
     player: PlayerController.State,
     transcription: TranscriptionController.State,
+    live: LiveTranscription.State,
+    desktopProgress: DesktopSync.Progress?,
     recordingHere: Boolean,
     onTranscribe: () -> Unit,
+    onRetranscribe: (List<String>) -> Unit,
     onPlay: (Recording, TranscriptSegment) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -92,6 +97,7 @@ fun TranscriptPane(
         it.durationMs > 0 && it.transcript == null && !transcription.isPending(session.id, it.id)
     }
     val busy = transcription.isBusyWith(session.id)
+    val liveHere = recordingHere && live.active && live.sessionId == session.id
 
     // Like notes, the line being played lights up. It counts as current a moment before it starts,
     // so tapping a line (which starts playback just before it) highlights that line straight away.
@@ -109,7 +115,17 @@ fun TranscriptPane(
         if (i >= 0 && !visible) listState.animateScrollToItem((i - 1).coerceAtLeast(0))
     }
 
+    // While transcribing live, keep the newest line in view, unless you've scrolled up to read.
+    val lineCount = rows.size
+    LaunchedEffect(lineCount) {
+        if (!liveHere || terms.isNotEmpty() || lineCount == 0) return@LaunchedEffect
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+        if (lastVisible >= lineCount - 3) listState.animateScrollToItem(lineCount - 1)
+    }
+
     Column(modifier.fillMaxWidth()) {
+        if (liveHere) LiveBanner(live.speaking)
+        desktopProgress?.let { DesktopStatus(session.id, it) }
         if (busy) {
             TranscribeProgress(session, transcription)
         } else if (untranscribed > 0) {
@@ -119,6 +135,21 @@ fun TranscriptPane(
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                 TextButton(onClick = { TranscriptionController.clearError() }) { Text("Dismiss") }
+            }
+        }
+        // Transcripts from before the current phone model (or of unknown origin) can be redone.
+        val outdated = session.recordings.filter {
+            it.durationMs > 0 && it.transcript != null && it.transcriptModel == null && !transcription.isPending(session.id, it.id)
+        }
+        if (outdated.isNotEmpty() && !recordingHere) {
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Made with the older, less accurate speech model.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { onRetranscribe(outdated.map { it.id }) }) { Text("Transcribe again") }
             }
         }
         if (transcribed) {
@@ -138,9 +169,25 @@ fun TranscriptPane(
             )
         }
         val lines = rows.count { it is TranscriptRow.Line }
+        val models = session.recordings.mapNotNull { it.transcriptModel }.distinct()
+        if (lines > 0 && models.isNotEmpty()) {
+            Text(
+                "Transcribed with " + models.joinToString { modelLabel(it) },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 16.dp, bottom = 4.dp),
+            )
+        }
         when {
             session.recordings.isEmpty() -> Hint("Record something, and what was said shows up here.")
-            !transcribed && recordingHere -> Hint("The transcript appears after you stop recording.")
+            !transcribed && liveHere -> Hint("Listening. Each phrase appears here a moment after it's spoken.")
+            !transcribed && recordingHere -> Hint(
+                if (transcription.modelReady) {
+                    "The transcript appears after you stop recording."
+                } else {
+                    "Transcribe a recording once to download the speech model; after that, transcripts appear live while you record."
+                },
+            )
             !transcribed -> if (!busy && untranscribed == 0) Hint("Nothing to transcribe yet.")
             terms.isNotEmpty() && lines == 0 -> Hint("Nothing said matches “${query.trim()}”.")
             lines == 0 -> Hint("No speech was found in the recording.")
@@ -175,6 +222,9 @@ fun TranscriptPane(
         }
     }
 }
+
+/** A readable name for the model that made a transcript. */
+fun modelLabel(id: String): String = if (id == SpeechModel.ID) "${SpeechModel.NAME} on this phone" else "$id on your desktop"
 
 private fun transcriptRows(session: Session, terms: List<String>): List<TranscriptRow> {
     val rows = ArrayList<TranscriptRow>()
@@ -211,6 +261,53 @@ private fun TranscriptLine(label: String, text: AnnotatedString, current: Boolea
         }
         Spacer(Modifier.width(12.dp))
         Text(text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f).padding(top = 1.dp))
+    }
+}
+
+@Composable
+private fun DesktopStatus(sessionId: String, progress: DesktopSync.Progress) {
+    val percent = (progress.fraction * 100).toInt()
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                when (progress.phase) {
+                    DesktopSync.Phase.SENDING -> "Sending to your desktop… $percent%"
+                    DesktopSync.Phase.TRANSCRIBING -> "Transcribing on your desktop… $percent%"
+                    DesktopSync.Phase.DONE -> "The transcript from your desktop is in."
+                    DesktopSync.Phase.FAILED -> progress.message ?: "Sending to the desktop failed."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (progress.phase == DesktopSync.Phase.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            when (progress.phase) {
+                DesktopSync.Phase.FAILED -> TextButton(onClick = { DesktopSync.send(sessionId) }) { Text("Retry") }
+                DesktopSync.Phase.DONE -> TextButton(onClick = { DesktopSync.clear(sessionId) }) { Text("OK") }
+                else -> Unit
+            }
+        }
+        if (progress.phase == DesktopSync.Phase.SENDING || progress.phase == DesktopSync.Phase.TRANSCRIBING) {
+            LinearProgressIndicator(progress = { progress.fraction }, modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+@Composable
+private fun LiveBanner(speaking: Boolean) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(8.dp).clip(RoundedCornerShape(4.dp))
+                .background(if (speaking) RecordRed else MaterialTheme.colorScheme.outline),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            if (speaking) "Listening…" else "Transcribing as you record",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -290,9 +387,9 @@ fun ModelDownloadDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
         title = { Text("Download the speech model?") },
         text = {
             Text(
-                "Transcription needs a ${SpeechModel.totalBytes / 1_000_000} MB speech model, downloaded once " +
-                    "(Wi-Fi recommended). After that it runs entirely on your phone and nothing is uploaded.\n\n" +
-                    "New recordings will then be transcribed automatically; you can turn that off in the main menu.",
+                "Transcription needs a ${SpeechModel.totalBytes / 1_000_000} MB speech model (${SpeechModel.NAME}), " +
+                    "downloaded once; use Wi-Fi. After that it runs entirely on your phone and nothing is uploaded.\n\n" +
+                    "From then on, recordings are transcribed live while you record; you can turn that off in the main menu.",
             )
         },
         confirmButton = { TextButton(onClick = onConfirm) { Text("Download and transcribe") } },
