@@ -1,0 +1,13 @@
+# Python environment and caches (run.sh creates these)
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Downloaded speech models (Hugging Face cache lives here unless HF_HOME is set)
+.cache/
+models/
+
+# Partial uploads, scratch output
+*.part
+/benchmark-results/

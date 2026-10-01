@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>AudioCool Desktop</title>
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+  <script>
+    // Apply the saved theme before first paint to avoid a flash.
+    try { const t = localStorage.getItem('ac-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#/" aria-label="AudioCool Desktop library">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="28" height="28"><rect width="32" height="32" rx="9" fill="var(--accent)"/><g fill="#fff"><rect x="7" y="13" width="3" height="6" rx="1.5"/><rect x="12" y="9" width="3" height="14" rx="1.5"/><rect x="17" y="6" width="3" height="20" rx="1.5"/><rect x="22" y="11" width="3" height="10" rx="1.5"/></g></svg>
+        </span>
+        <span class="brand-name">AudioCool <span class="brand-sub">Desktop</span></span>
+      </a>
+      <nav class="nav" aria-label="Main">
+        <a href="#/" data-nav="library">Library</a>
+        <a href="#/jobs" data-nav="jobs">Jobs <span class="nav-badge" id="jobs-badge" hidden></span></a>
+        <a href="#/import" data-nav="import">Import</a>
+        <a href="#/pair" data-nav="pair">Pair</a>
+        <a href="#/settings" data-nav="settings">Settings</a>
+      </nav>
+      <form class="search" id="search-form" role="search" autocomplete="off">
+        <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="search-input" type="search" placeholder="Search notes and transcripts" aria-label="Search notes and transcripts" spellcheck="false">
+        <kbd class="search-kbd" aria-hidden="true">/</kbd>
+      </form>
+      <button class="icon-btn theme-btn" id="theme-btn" type="button" aria-label="Theme" title="Theme"></button>
+    </div>
+  </header>
+  <main id="view" class="view" tabindex="-1"></main>
+  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+  <audio id="audio" preload="metadata"></audio>
+  <script src="/static/app.js"></script>
+</body>
+</html>

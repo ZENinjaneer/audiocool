@@ -1,0 +1,20 @@
+# AudioCool Desktop dependencies, the versions it was tested with.
+# PyTorch is installed separately by run.sh from the CUDA wheel index (see TORCH_* there).
+
+# Speech models and audio
+transformers==5.18.0
+huggingface-hub==1.33.0
+silero-vad==6.2.3
+librosa==1.0.0          # Parakeet's feature extractor builds its mel filters with it
+av==19.0.0              # PyAV: decodes the phone's AAC (.aac/.m4a) with its bundled FFmpeg
+numpy==2.5.3
+
+# Server
+fastapi==0.142.2
+uvicorn[standard]==0.54.0
+segno==1.6.6            # pairing QR code (pure Python)
+
+# Tests
+pytest==9.1.1
+httpx==0.28.1
+httpx2==2.13.1
