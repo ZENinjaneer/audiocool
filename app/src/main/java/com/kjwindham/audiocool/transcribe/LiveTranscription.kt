@@ -7,6 +7,7 @@ import android.os.PowerManager
 import android.os.Process
 import android.util.Log
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
+import com.k2fsa.sherpa.onnx.OnlineSpeechDenoiser
 import com.k2fsa.sherpa.onnx.Vad
 import com.kjwindham.audiocool.data.SessionRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +28,7 @@ object LiveTranscription {
 
     private const val TAG = "LiveTranscription"
     private const val VAD_ASSET = "silero_vad.onnx"
+    private const val DENOISER_ASSET = "gtcrn_simple.onnx"
 
     // It only has to keep up with speech, and the phone is busy recording: use fewer threads than
     // transcription after the fact.
@@ -49,6 +51,13 @@ object LiveTranscription {
     @Volatile
     private var current: Run? = null
     private val main = Handler(Looper.getMainLooper())
+
+    // The loaded speech model, shared with dictation; the lock keeps it from being freed mid-use.
+    private val recognizerLock = Any()
+    private var sharedRecognizer: OfflineRecognizer? = null
+
+    /** Runs [block] with the speech model live transcription has loaded; null if it hasn't one. */
+    fun <T> withRecognizer(block: (OfflineRecognizer) -> T): T? = synchronized(recognizerLock) { sharedRecognizer?.let(block) }
 
     /** Starts transcribing [file] as it's recorded, if the model is downloaded and the user wants it. */
     fun start(context: Context, sessionId: String, recId: String, file: File) {
@@ -83,15 +92,19 @@ object LiveTranscription {
             .apply { acquire(6 * 60 * 60 * 1000L) }
         var recognizer: OfflineRecognizer? = null
         var vad: Vad? = null
+        var denoiser: OnlineSpeechDenoiser? = null
         val result = try {
             recognizer = OfflineRecognizer(null, SpeechModel.recognizerConfig(context, THREADS))
-            vad = Vad(context.assets, Transcriber.vadConfig(VAD_ASSET, Transcriber.LIVE_MAX_SEGMENT_SECONDS))
+            synchronized(recognizerLock) { sharedRecognizer = recognizer }
+            vad = Vad(context.assets, Transcriber.vadConfig(VAD_ASSET))
+            denoiser = OnlineSpeechDenoiser(context.assets, Transcriber.denoiserConfig(DENOISER_ASSET))
             val live = LiveTranscriber(
                 run.source,
                 recognizer,
                 vad,
                 onSegment = { SessionRepository.appendTranscriptSegment(run.sessionId, run.recId, it, SpeechModel.ID) },
                 onSpeaking = { speaking -> _state.update { if (it.recId == run.recId) it.copy(speaking = speaking) else it } },
+                denoiser = denoiser,
             )
             run.transcriber = live
             if (run.handedOff) live.stopRequested = true
@@ -100,8 +113,10 @@ object LiveTranscription {
             run.source.close()
             LiveTranscriber.Result.Stopped(emptyList(), 0L, e)
         } finally {
+            synchronized(recognizerLock) { sharedRecognizer = null }
             recognizer?.release()
             vad?.release()
+            denoiser?.release()
             if (wakeLock.isHeld) wakeLock.release()
         }
         finish(run, result)

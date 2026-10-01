@@ -21,6 +21,10 @@ object SpeechModel {
     const val ID = "parakeet-unified-en-0.6b"
     const val NAME = "Parakeet 0.6B"
 
+    // The model's licence asks for this exact notice wherever the model is distributed.
+    const val LICENSE_NOTICE = "Licensed by NVIDIA Corporation under the NVIDIA Open Model License"
+    const val LICENSE_URL = "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/"
+
     // Pinned to a commit, so the files can't change underneath the checksums below.
     private const val BASE_URL =
         "https://huggingface.co/csukuangfj2/sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming/" +

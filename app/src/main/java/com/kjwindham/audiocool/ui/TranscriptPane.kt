@@ -43,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -55,9 +56,9 @@ import com.kjwindham.audiocool.audio.PlayerController
 import com.kjwindham.audiocool.data.Recording
 import com.kjwindham.audiocool.data.Session
 import com.kjwindham.audiocool.data.TranscriptSegment
+import com.kjwindham.audiocool.desktop.DesktopSync
 import com.kjwindham.audiocool.search.findTerms
 import com.kjwindham.audiocool.search.searchTerms
-import com.kjwindham.audiocool.desktop.DesktopSync
 import com.kjwindham.audiocool.transcribe.LiveTranscription
 import com.kjwindham.audiocool.transcribe.SpeechModel
 import com.kjwindham.audiocool.transcribe.TranscriptionController
@@ -386,11 +387,18 @@ fun ModelDownloadDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text("Download the speech model?") },
         text = {
-            Text(
-                "Transcription needs a ${SpeechModel.totalBytes / 1_000_000} MB speech model (${SpeechModel.NAME}), " +
-                    "downloaded once; use Wi-Fi. After that it runs entirely on your phone and nothing is uploaded.\n\n" +
-                    "From then on, recordings are transcribed live while you record; you can turn that off in the main menu.",
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "Transcription needs a ${SpeechModel.totalBytes / 1_000_000} MB speech model (${SpeechModel.NAME}), " +
+                        "downloaded once; use Wi-Fi. After that it runs entirely on your phone and nothing is uploaded.\n\n" +
+                        "From then on, recordings are transcribed live while you record; you can turn that off in the main menu.",
+                )
+                val uriHandler = LocalUriHandler.current
+                Text("${SpeechModel.LICENSE_NOTICE}.", style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { uriHandler.openUri(SpeechModel.LICENSE_URL) }, contentPadding = PaddingValues(0.dp)) {
+                    Text("View the licence")
+                }
+            }
         },
         confirmButton = { TextButton(onClick = onConfirm) { Text("Download and transcribe") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },

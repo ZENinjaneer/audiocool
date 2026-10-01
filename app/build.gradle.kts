@@ -58,8 +58,8 @@ android {
         applicationId = "com.kjwindham.audiocool"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
         // The speech engine is native code; ship only the 64-bit ARM build every current phone uses.
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -93,6 +93,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     lint {
@@ -133,6 +134,7 @@ tasks.withType<Test>().configureEach {
     providers.gradleProperty("asrBenchThreads").orNull?.let { systemProperty("asr.bench.threads", it) }
     providers.gradleProperty("asrBenchLeveling").orNull?.let { systemProperty("asr.bench.leveling", it) }
     providers.gradleProperty("asrBenchMaxSegment").orNull?.let { systemProperty("asr.bench.maxSegment", it) }
+    providers.gradleProperty("asrBenchDenoiser").orNull?.let { systemProperty("asr.bench.denoiser", it) }
     maxHeapSize = "4g"
 }
 

@@ -2,14 +2,20 @@ package com.kjwindham.audiocool.audio
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.media.MediaRecorder
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import com.kjwindham.audiocool.data.Recording
 import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.data.newId
 import com.kjwindham.audiocool.transcribe.LiveTranscription
 import com.kjwindham.audiocool.transcribe.TranscriptionController
+import com.kjwindham.audiocool.util.Prefs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -27,6 +33,10 @@ import kotlin.math.log10
 /**
  * Owns the MediaRecorder. Notes take their timestamp from [currentOffsetMs], which counts only
  * time spent actually recording, so it lines up with the audio file across pauses.
+ *
+ * It records with the phone's own mic even when a headset is plugged in (Android would otherwise
+ * switch to the headset's mic), so the headset is free for dictating notes; [useExternalMic]
+ * switches to a plugged-in mic instead, such as a clip-on mic near the speaker.
  */
 object RecorderController {
     enum class Status { IDLE, RECORDING, PAUSED }
@@ -39,6 +49,11 @@ object RecorderController {
         /** Input level, 0..1, for the meter. */
         val level: Float = 0f,
         val error: String? = null,
+        /** The mic being recorded from, e.g. "phone mic". */
+        val mic: String? = null,
+        /** A plugged-in mic it could record from instead, if any. */
+        val externalMic: String? = null,
+        val usingExternalMic: Boolean = false,
     )
 
     private val _state = MutableStateFlow(State())
@@ -47,11 +62,16 @@ object RecorderController {
     // The application context, which lives as long as the process, so holding it isn't a leak.
     @SuppressLint("StaticFieldLeak")
     private lateinit var app: Context
+    @Volatile
     private var recorder: MediaRecorder? = null
     private var accumulatedMs = 0L
     private var runStartedAt = 0L
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var ticker: Job? = null
+    private val deviceCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = routeMic()
+        override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) = routeMic()
+    }
 
     fun init(context: Context) {
         app = context.applicationContext
@@ -83,6 +103,7 @@ object RecorderController {
             r.setAudioEncodingBitRate(96_000)
             r.setOutputFile(file.absolutePath)
             r.setOnErrorListener { _, what, extra -> scope.launch { fail("Recording stopped (error $what/$extra)") } }
+            chosenMic()?.let { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) r.setPreferredDevice(it) }
             r.prepare()
             r.start()
         } catch (e: Exception) {
@@ -97,6 +118,8 @@ object RecorderController {
         val rec = Recording(id = newId(), file = file.name, createdAt = System.currentTimeMillis(), durationMs = 0)
         SessionRepository.addRecording(sessionId, rec)
         _state.value = State(Status.RECORDING, sessionId, rec.id)
+        app.getSystemService(AudioManager::class.java).registerAudioDeviceCallback(deviceCallback, Handler(Looper.getMainLooper()))
+        routeMic()
         startTicker()
         RecordingService.start(app)
         LiveTranscription.start(app, sessionId, rec.id, file)
@@ -130,6 +153,8 @@ object RecorderController {
         if (st.status == Status.IDLE) return
         val duration = currentOffsetMs()
         ticker?.cancel()
+        app.getSystemService(AudioManager::class.java).unregisterAudioDeviceCallback(deviceCallback)
+        Dictation.recordingStopped(app)
         recorder?.let { r ->
             try {
                 r.stop()
@@ -151,6 +176,41 @@ object RecorderController {
     }
 
     fun clearError() = _state.update { it.copy(error = null) }
+
+    /** Records with the plugged-in mic ([external]) or the phone's own; remembered for next time. */
+    fun useExternalMic(external: Boolean) {
+        Prefs(app).recordWithExternalMic = external
+        routeMic()
+    }
+
+    /** Whether Android has silenced the recording, e.g. because another recording took the mic; null if unknown. */
+    fun isSilenced(): Boolean? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        runCatching { recorder?.activeRecordingConfiguration?.isClientSilenced }.getOrNull()
+    } else {
+        null
+    }
+
+    /** The mic actually being recorded from, if Android says. */
+    fun activeMic(): AudioDeviceInfo? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        runCatching { recorder?.activeRecordingConfiguration?.audioDevice }.getOrNull()
+    } else {
+        null
+    }
+
+    /** The mic to record with: the plugged-in one ([external]) if chosen, else the phone's own. */
+    private fun chosenMic(external: AudioDeviceInfo? = Mics.external(app, bluetooth = false)): AudioDeviceInfo? =
+        if (external != null && Prefs(app).recordWithExternalMic) external else Mics.phone(app)
+
+    /** Points the recording at the chosen mic, after a mic is plugged in or out or the choice changes. */
+    private fun routeMic() {
+        val r = recorder ?: return
+        val external = Mics.external(app, bluetooth = false)
+        val mic = chosenMic(external)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) r.setPreferredDevice(mic)
+        _state.update {
+            it.copy(mic = Mics.label(mic), externalMic = external?.let(Mics::label), usingExternalMic = external != null && mic === external)
+        }
+    }
 
     private fun fail(message: String) {
         stop()

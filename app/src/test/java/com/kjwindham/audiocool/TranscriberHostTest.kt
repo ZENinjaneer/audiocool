@@ -1,6 +1,7 @@
 package com.kjwindham.audiocool
 
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
+import com.k2fsa.sherpa.onnx.OnlineSpeechDenoiser
 import com.k2fsa.sherpa.onnx.Vad
 import com.kjwindham.audiocool.transcribe.Resampler
 import com.kjwindham.audiocool.transcribe.SpeechModel
@@ -39,10 +40,11 @@ class TranscriberHostTest {
 
             val recognizer = OfflineRecognizer(null, SpeechModel.recognizerConfig(modelDir, threads = 4))
             val vad = Vad(null, Transcriber.vadConfig(File(hostDir, "silero_vad.onnx").path))
+            val denoiser = OnlineSpeechDenoiser(null, Transcriber.denoiserConfig(File(hostDir, "gtcrn_simple.onnx").path))
             val started = System.nanoTime()
             // Same path as on the phone: 44.1 kHz chunks -> Resampler -> Transcriber.
             val resampler = Resampler(44_100, Transcriber.SAMPLE_RATE)
-            val transcriber = Transcriber(recognizer, vad)
+            val transcriber = Transcriber(recognizer, vad, denoiser = denoiser)
             var i = 0
             while (i < audio.size) {
                 val n = minOf(4096, audio.size - i)
@@ -54,6 +56,7 @@ class TranscriberHostTest {
             val seconds = (System.nanoTime() - started) / 1e9
             recognizer.release()
             vad.release()
+            denoiser.release()
 
             println("${modelDir.name}: %.1f s of audio in %.2f s (%.0fx real time)".format(audioSeconds, seconds, audioSeconds / seconds))
             segments.forEach { println("  [${it.startMs}-${it.endMs} ms] ${it.text}") }

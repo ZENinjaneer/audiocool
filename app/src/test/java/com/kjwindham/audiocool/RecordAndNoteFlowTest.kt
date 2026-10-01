@@ -6,6 +6,8 @@ import android.app.Notification
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Looper
 import androidx.compose.ui.test.assertCountEquals
@@ -21,6 +23,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.kjwindham.audiocool.audio.Dictation
 import com.kjwindham.audiocool.audio.PlayerController
 import com.kjwindham.audiocool.audio.RecorderController
 import com.kjwindham.audiocool.audio.RecordingService
@@ -32,6 +35,7 @@ import com.kjwindham.audiocool.transcribe.TranscriptionController
 import com.kjwindham.audiocool.transcribe.TranscriptionService
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -42,11 +46,16 @@ import org.robolectric.Robolectric
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.AudioDeviceInfoBuilder
+import org.robolectric.shadows.ShadowAudioRecord
 import org.robolectric.shadows.ShadowMediaPlayer
 import org.robolectric.shadows.util.DataSource
 import java.io.File
 import java.io.FileOutputStream
 import java.time.Duration
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.PI
+import kotlin.math.sin
 
 /** Drives the real UI under Robolectric on Android 14 (the S21's last OS) at a Galaxy S21-like screen size. */
 @RunWith(AndroidJUnit4::class)
@@ -68,6 +77,78 @@ class RecordAndNoteFlowTest {
         RecorderController.stop()
         PlayerController.release()
         TranscriptionController.cancelAll()
+        Dictation.recognizeForTest = null
+        ShadowAudioRecord.clearSource()
+    }
+
+    @Test
+    fun withAHeadsetPluggedInThePhoneMicKeepsRecordingTheRoom() {
+        // (Robolectric can't fake the phone's own mic, only headsets, so "mic" here means the phone's.)
+        val audio = shadowOf(app.getSystemService(AudioManager::class.java))
+        compose.onNodeWithContentDescription("New session").performClick()
+        compose.onNodeWithText("Start recording").performClick()
+        compose.onNodeWithText("Record with").assertDoesNotExist()
+
+        // A Bluetooth headset is for your own voice, so it isn't offered for recording the room.
+        audio.addInputDevice(AudioDeviceInfoBuilder.newBuilder().setType(AudioDeviceInfo.TYPE_BLUETOOTH_SCO).build(), true)
+        shadowOf(Looper.getMainLooper()).idle()
+        compose.onNodeWithText("Record with").assertDoesNotExist()
+
+        // Plugging in a headset doesn't take the recording over, but it can be chosen instead.
+        audio.addInputDevice(AudioDeviceInfoBuilder.newBuilder().setType(AudioDeviceInfo.TYPE_USB_HEADSET).build(), true)
+        shadowOf(Looper.getMainLooper()).idle()
+        compose.onNodeWithText("Record with").assertIsDisplayed()
+        assertFalse(RecorderController.state.value.usingExternalMic)
+        assertEquals("mic", RecorderController.state.value.mic)
+        screenshot("7-record-with")
+        compose.onNodeWithText("Headset mic").performClick()
+        assertTrue(RecorderController.state.value.usingExternalMic)
+        assertEquals("headset mic", RecorderController.state.value.mic)
+        compose.onNodeWithText("Phone mic").performClick()
+        assertFalse(RecorderController.state.value.usingExternalMic)
+    }
+
+    @Test
+    fun aSpokenNoteIsTranscribedAndLinkedToWhenYouStartedTalking() {
+        TranscriptionController.autoTranscribe = false
+        TranscriptionController.modelDownloaded()
+        // A tone stands in for your voice, arriving in real time; the speech model is stubbed out.
+        var phase = 0.0
+        ShadowAudioRecord.setSource(object : ShadowAudioRecord.AudioRecordSource {
+            override fun readInShortArray(audioData: ShortArray, offsetInShorts: Int, sizeInShorts: Int, isBlocking: Boolean): Int {
+                for (i in 0 until sizeInShorts) {
+                    audioData[offsetInShorts + i] = (8_000 * sin(phase)).toInt().toShort()
+                    phase += 2 * PI * 440 / 16_000
+                }
+                Thread.sleep(sizeInShorts * 1_000L / 16_000)
+                return sizeInShorts
+            }
+        })
+        val heardSamples = AtomicInteger()
+        Dictation.recognizeForTest = {
+            heardSamples.set(it.size)
+            "Ask whether this is on the exam"
+        }
+
+        compose.onNodeWithContentDescription("New session").performClick()
+        compose.onNodeWithText("Start recording").performClick()
+        advance(30)
+        // A tap listens hands-free; the next tap adds the note.
+        compose.onNodeWithContentDescription("Speak a note").performClick()
+        compose.onNodeWithText("Listening on the", substring = true).assertIsDisplayed()
+        Thread.sleep(700)
+        screenshot("6-dictating")
+        compose.onNodeWithContentDescription("Stop and add the spoken note").performClick()
+        compose.waitUntil(5_000) { SessionRepository.sessions.value.single().notes.isNotEmpty() }
+
+        val note = SessionRepository.sessions.value.single().notes.single()
+        assertEquals("Ask whether this is on the exam", note.text)
+        assertEquals(RecorderController.state.value.recId, note.recId)
+        assertTrue("linked at ${note.offsetMs}", note.offsetMs!! in 29_000L..31_500L)
+        assertTrue("heard ${heardSamples.get()} samples", heardSamples.get() >= 16_000 / 2)
+        compose.onNodeWithText("Ask whether this is on the exam").assertIsDisplayed()
+        // The recording carried on throughout.
+        assertEquals(RecorderController.Status.RECORDING, RecorderController.state.value.status)
     }
 
     @Test

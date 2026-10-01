@@ -99,6 +99,7 @@ fun SessionListScreen(
     var showMenu by remember { mutableStateOf(false) }
     var showBackup by remember { mutableStateOf(false) }
     var showDesktop by remember { mutableStateOf(false) }
+    var showAbout by remember { mutableStateOf(false) }
     var confirmModelDownload by remember { mutableStateOf(false) }
     var autoTranscribe by remember { mutableStateOf(TranscriptionController.autoTranscribe) }
     val snackbar = remember { SnackbarHostState() }
@@ -184,6 +185,13 @@ fun SessionListScreen(
                                     onClick = {
                                         showMenu = false
                                         showBackup = true
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("About") },
+                                    onClick = {
+                                        showMenu = false
+                                        showAbout = true
                                     },
                                 )
                             }
@@ -276,6 +284,7 @@ fun SessionListScreen(
         )
     }
     if (showDesktop) DesktopDialog(onDismiss = { showDesktop = false })
+    if (showAbout) AboutDialog(onDismiss = { showAbout = false })
     if (showBackup) {
         BackupDialog(
             onDismiss = { showBackup = false },

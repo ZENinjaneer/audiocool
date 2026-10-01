@@ -1,6 +1,7 @@
 package com.kjwindham.audiocool
 
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
+import com.k2fsa.sherpa.onnx.OnlineSpeechDenoiser
 import com.k2fsa.sherpa.onnx.Vad
 import com.kjwindham.audiocool.data.TranscriptSegment
 import com.kjwindham.audiocool.transcribe.LiveTranscriber
@@ -29,6 +30,7 @@ class LiveTranscriberHostTest {
     private val hostDir = System.getProperty("sherpa.host.dir")?.let(::File)
     private lateinit var recognizer: OfflineRecognizer
     private lateinit var vad: Vad
+    private lateinit var denoiser: OnlineSpeechDenoiser
     private lateinit var clip: FloatArray
     private var rate = 0
 
@@ -58,7 +60,8 @@ class LiveTranscriberHostTest {
         assumeTrue("pass -PsherpaHostDir to run the speech engine on the host", hostDir != null)
         val model = File(hostDir, "models").listFiles().orEmpty().first { it.name.contains(SpeechModel.ID) }
         recognizer = OfflineRecognizer(null, SpeechModel.recognizerConfig(model, threads = 2))
-        vad = Vad(null, Transcriber.vadConfig(File(hostDir, "silero_vad.onnx").path, Transcriber.LIVE_MAX_SEGMENT_SECONDS))
+        vad = Vad(null, Transcriber.vadConfig(File(hostDir, "silero_vad.onnx").path))
+        denoiser = OnlineSpeechDenoiser(null, Transcriber.denoiserConfig(File(hostDir, "gtcrn_simple.onnx").path))
         readWav(File(model, "test_wavs/0.wav")).let { (samples, sampleRate) ->
             clip = samples
             rate = sampleRate
@@ -69,13 +72,14 @@ class LiveTranscriberHostTest {
     fun tearDown() {
         if (::recognizer.isInitialized) recognizer.release()
         if (::vad.isInitialized) vad.release()
+        if (::denoiser.isInitialized) denoiser.release()
     }
 
     @Test
     fun phrasesArriveWhileTheRecordingIsStillGoing() {
         val source = GrowingSource()
         val arrived = LinkedBlockingQueue<TranscriptSegment>()
-        val live = LiveTranscriber(source, recognizer, vad, onSegment = { arrived.put(it) })
+        val live = LiveTranscriber(source, recognizer, vad, onSegment = { arrived.put(it) }, denoiser = denoiser)
         val result = AtomicReference<LiveTranscriber.Result>()
         val worker = thread { result.set(live.run()) }
 
@@ -94,17 +98,21 @@ class LiveTranscriberHostTest {
         worker.join(60_000)
         val done = result.get() as LiveTranscriber.Result.Finished
         assertEquals(first, done.segments[0])
-        // Both copies of the clip come out the same (the clip may hold more than one phrase).
-        assertTrue(done.segments.size % 2 == 0)
-        val half = done.segments.size / 2
-        assertEquals(done.segments.take(half).map { it.text }, done.segments.drop(half).map { it.text })
+        // Both copies of the clip say the same words (punctuation and phrase breaks may differ).
+        val secondCopyMs = (3L * rate + clip.size) * 1000 / rate - 500
+        val (one, two) = done.segments.partition { it.startMs < secondCopyMs }
+        assertEquals(words(one), words(two))
+        assertTrue(words(one).size > 10)
     }
+
+    private fun words(segments: List<TranscriptSegment>) =
+        segments.joinToString(" ") { it.text }.lowercase().replace(Regex("[^a-z' ]"), " ").split(" ").filter { it.isNotBlank() }
 
     @Test
     fun stoppingEarlySaysWhereToPickUp() {
         val source = GrowingSource()
         val arrived = LinkedBlockingQueue<TranscriptSegment>()
-        val live = LiveTranscriber(source, recognizer, vad, onSegment = { arrived.put(it) })
+        val live = LiveTranscriber(source, recognizer, vad, onSegment = { arrived.put(it) }, denoiser = denoiser)
         val result = AtomicReference<LiveTranscriber.Result>()
         val worker = thread { result.set(live.run()) }
 

@@ -3,12 +3,14 @@ package com.kjwindham.audiocool.ui
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -62,13 +64,14 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SliderState
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -76,6 +79,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -88,7 +92,14 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -98,18 +109,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kjwindham.audiocool.audio.Dictation
 import com.kjwindham.audiocool.audio.PlayerController
 import com.kjwindham.audiocool.audio.RecorderController
 import com.kjwindham.audiocool.data.Note
+import com.kjwindham.audiocool.data.NoteFocus
 import com.kjwindham.audiocool.data.Recording
 import com.kjwindham.audiocool.data.Session
 import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.data.TranscriptSegment
-import com.kjwindham.audiocool.data.NoteFocus
 import com.kjwindham.audiocool.data.highlightedNoteId
 import com.kjwindham.audiocool.data.newId
-import com.kjwindham.audiocool.desktop.DesktopSync
 import com.kjwindham.audiocool.data.playbackStartFor
+import com.kjwindham.audiocool.desktop.DesktopSync
 import com.kjwindham.audiocool.transcribe.LiveTranscription
 import com.kjwindham.audiocool.transcribe.TranscriptionController
 import com.kjwindham.audiocool.util.Prefs
@@ -135,6 +147,7 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
     val live by LiveTranscription.state.collectAsStateWithLifecycle()
     val desktop by DesktopSync.pairing.collectAsStateWithLifecycle()
     val desktopProgress by DesktopSync.progress.collectAsStateWithLifecycle()
+    val dictation by Dictation.state.collectAsStateWithLifecycle()
     val prefs = remember { Prefs(context) }
     var leadInSec by remember { mutableIntStateOf(prefs.leadInSeconds) }
     val snackbar = remember { SnackbarHostState() }
@@ -149,6 +162,8 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
         ?: playable.firstOrNull { playerHere && it.id == player.recId }
         ?: playable.lastOrNull()
     val canStamp = recordingHere || (playerHere && player.engaged)
+    val canDictate = transcription.modelReady && !recordingElsewhere &&
+        ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
     var draft by rememberSaveable(session.id) { mutableStateOf("") }
     // Where the note being typed will link to, kept as two saveable values so it survives rotation.
@@ -175,6 +190,14 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
             PlayerController.clearError()
         }
     }
+    LaunchedEffect(dictation.problem) {
+        dictation.problem?.let {
+            Dictation.clearProblem()
+            snackbar.showSnackbar(it)
+        }
+    }
+    // Leaving the screen ends a spoken note in progress.
+    DisposableEffect(Unit) { onDispose { Dictation.stop(context) } }
 
     fun toast(message: String) {
         scope.launch { snackbar.showSnackbar(message) }
@@ -374,6 +397,7 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
                     session = session,
                     player = player,
                     recordingHere = recordingHere,
+                    canDictate = canDictate,
                     modifier = Modifier.weight(1f),
                     onTap = { note -> if (note.offsetMs != null) playNote(note) else editing = note },
                     onEdit = { editing = it },
@@ -396,9 +420,16 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
                 draft = draft,
                 stampLabel = draftStamp()?.let { noteLabel(session, Note("", "", 0, it.recId, it.offsetMs)) },
                 canStamp = canStamp,
+                dictation = dictation,
+                canDictate = canDictate,
                 onDraftChange = ::onDraftChange,
                 onSend = ::submitDraft,
                 onMark = { addNote("★ Marked", currentStamp()) },
+                onDictateStart = {
+                    val stamp = currentStamp()
+                    Dictation.start(context, session.id, stamp?.recId, stamp?.offsetMs)
+                },
+                onDictateStop = { Dictation.stop(context) },
             )
         }
     }
@@ -494,6 +525,20 @@ private fun RecordingControls(rec: RecorderController.State, liveLine: String?) 
     }
     Spacer(Modifier.height(10.dp))
     LinearProgressIndicator(progress = { rec.level }, modifier = Modifier.fillMaxWidth())
+    // With a headset plugged in, choose which mic records the room; the other one takes spoken notes.
+    rec.externalMic?.let { external ->
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+            Text("Record with", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.width(8.dp))
+            FilterChip(selected = !rec.usingExternalMic, onClick = { RecorderController.useExternalMic(false) }, label = { Text("Phone mic") })
+            Spacer(Modifier.width(8.dp))
+            FilterChip(
+                selected = rec.usingExternalMic,
+                onClick = { RecorderController.useExternalMic(true) },
+                label = { Text(external.replaceFirstChar { it.uppercase() }) },
+            )
+        }
+    }
     // The latest live-transcribed phrase, so you can see it working without switching tabs.
     if (liveLine != null) {
         Text(
@@ -650,6 +695,7 @@ private fun NotesList(
     session: Session,
     player: PlayerController.State,
     recordingHere: Boolean,
+    canDictate: Boolean,
     modifier: Modifier,
     onTap: (Note) -> Unit,
     onEdit: (Note) -> Unit,
@@ -683,7 +729,11 @@ private fun NotesList(
     if (notes.isEmpty()) {
         Box(modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
             Text(
-                if (recordingHere) "Type below. Each note is linked to this moment in the recording." else "No notes yet.",
+                when {
+                    !recordingHere -> "No notes yet."
+                    canDictate -> "Type below, or hold the mic and say it. Each note is linked to this moment in the recording."
+                    else -> "Type below. Each note is linked to this moment in the recording."
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -772,24 +822,36 @@ private fun Composer(
     draft: String,
     stampLabel: String?,
     canStamp: Boolean,
+    dictation: Dictation.State,
+    canDictate: Boolean,
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
     onMark: () -> Unit,
+    onDictateStart: () -> Unit,
+    onDictateStop: () -> Unit,
 ) {
     Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.navigationBarsPadding().imePadding().padding(horizontal = 4.dp, vertical = 6.dp)) {
-            if (stampLabel != null) {
-                Text(
-                    "Links to $stampLabel",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 60.dp, bottom = 2.dp),
-                )
+            val status = when {
+                dictation.listening -> "Listening on the ${dictation.mic}…"
+                dictation.transcribing -> "Adding your spoken note…"
+                stampLabel != null -> "Links to $stampLabel"
+                else -> null
+            }
+            if (status != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 60.dp, end = 16.dp, bottom = 2.dp)) {
+                    Text(status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    if (dictation.listening) {
+                        Spacer(Modifier.width(8.dp))
+                        LinearProgressIndicator(progress = { dictation.level }, modifier = Modifier.weight(1f))
+                    }
+                }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onMark, enabled = canStamp) {
                     Icon(Icons.Filled.Star, contentDescription = "Mark this moment")
                 }
+                if (canDictate) DictateButton(dictation.listening, onDictateStart, onDictateStop)
                 OutlinedTextField(
                     value = draft,
                     onValueChange = onDraftChange,
@@ -804,5 +866,53 @@ private fun Composer(
                 }
             }
         }
+    }
+}
+
+/**
+ * Hold to speak a note, let go to add it. A quick tap listens hands-free until the next tap, which is
+ * also what TalkBack's double-tap does.
+ */
+@Composable
+private fun DictateButton(listening: Boolean, onStart: () -> Unit, onStop: () -> Unit) {
+    val haptics = LocalHapticFeedback.current
+    val isListening by rememberUpdatedState(listening)
+    var handsFree by remember { mutableStateOf(false) }
+    LaunchedEffect(listening) { if (!listening) handsFree = false }
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(if (listening) RecordRed else Color.Transparent)
+            .semantics {
+                role = Role.Button
+                contentDescription = if (listening) "Stop and add the spoken note" else "Speak a note"
+                onClick {
+                    if (isListening) {
+                        onStop()
+                    } else {
+                        handsFree = true
+                        onStart()
+                    }
+                    true
+                }
+            }
+            .pointerInput(Unit) {
+                detectTapGestures(onPress = {
+                    if (handsFree) {
+                        handsFree = false
+                        onStop()
+                        return@detectTapGestures
+                    }
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    val pressedAt = SystemClock.uptimeMillis()
+                    onStart()
+                    val released = tryAwaitRelease()
+                    if (released && SystemClock.uptimeMillis() - pressedAt < 400) handsFree = true else onStop()
+                })
+            },
+    ) {
+        Icon(AppIcons.Mic, contentDescription = null, tint = if (listening) Color.White else MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

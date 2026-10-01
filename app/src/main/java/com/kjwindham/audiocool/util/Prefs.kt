@@ -11,6 +11,11 @@ class Prefs(context: Context) {
         get() = sp.getInt("lead_in_seconds", 3)
         set(value) = sp.edit { putInt("lead_in_seconds", value) }
 
+    /** Record with a plugged-in mic when there is one, instead of the phone's own. */
+    var recordWithExternalMic: Boolean
+        get() = sp.getBoolean("record_with_external_mic", false)
+        set(value) = sp.edit { putBoolean("record_with_external_mic", value) }
+
     var askedNotificationPermission: Boolean
         get() = sp.getBoolean("asked_notification_permission", false)
         set(value) = sp.edit { putBoolean("asked_notification_permission", value) }

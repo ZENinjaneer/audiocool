@@ -15,6 +15,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
+import com.k2fsa.sherpa.onnx.OnlineSpeechDenoiser
 import com.k2fsa.sherpa.onnx.Vad
 import com.kjwindham.audiocool.MainActivity
 import com.kjwindham.audiocool.R
@@ -129,9 +130,10 @@ class TranscriptionService : Service() {
         // may have been converted from .aac to .m4a.
         val latest = SessionRepository.get(job.sessionId)?.recording(job.recId) ?: return
         val vad = Vad(assets, Transcriber.vadConfig(VAD_ASSET))
+        val denoiser = OnlineSpeechDenoiser(assets, Transcriber.denoiserConfig(DENOISER_ASSET))
         try {
             // A job can pick up where live transcription left off: skip what's already transcribed.
-            val transcriber = Transcriber(engine, vad, offsetMs = job.fromMs)
+            val transcriber = Transcriber(engine, vad, offsetMs = job.fromMs, denoiser = denoiser)
             var skip = job.fromMs * Transcriber.SAMPLE_RATE / 1000
             AudioDecoder(SessionRepository.audioFile(job.sessionId, latest), Transcriber.SAMPLE_RATE).decode(
                 isCancelled = cancelled,
@@ -152,6 +154,7 @@ class TranscriptionService : Service() {
             SessionRepository.setTranscript(job.sessionId, job.recId, earlier + transcriber.finish(), SpeechModel.ID)
         } finally {
             vad.release()
+            denoiser.release()
         }
     }
 
@@ -216,6 +219,7 @@ class TranscriptionService : Service() {
         const val NOTIFICATION_ID = 2
         const val ACTION_STOP = "com.kjwindham.audiocool.action.STOP_TRANSCRIBING"
         const val VAD_ASSET = "silero_vad.onnx"
+        const val DENOISER_ASSET = "gtcrn_simple.onnx"
         const val THREADS = 4
     }
 }

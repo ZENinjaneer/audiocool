@@ -5,8 +5,12 @@ import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineQwen3AsrModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
+import com.k2fsa.sherpa.onnx.OfflineSpeechDenoiserGtcrnModelConfig
+import com.k2fsa.sherpa.onnx.OfflineSpeechDenoiserModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
 import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
+import com.k2fsa.sherpa.onnx.OnlineSpeechDenoiser
+import com.k2fsa.sherpa.onnx.OnlineSpeechDenoiserConfig
 import com.k2fsa.sherpa.onnx.Vad
 import com.kjwindham.audiocool.transcribe.SpeechModel
 import com.kjwindham.audiocool.transcribe.Transcriber
@@ -71,7 +75,7 @@ class ModelBenchmarkHostTest {
                 line.append("  $set WER %.1f%% (%.0fx RT)".format(wer, speed))
             }
             results.put("sets", sets).put("samples", samplesOut)
-            val tag = "$leveling-${System.getProperty("asr.bench.maxSegment") ?: "20"}s"
+            val tag = "$leveling-${System.getProperty("asr.bench.maxSegment") ?: "20"}s" + if (denoiserModel != null) "-vadgtcrn" else ""
             File(benchDir, "results-${dir.name}-$tag.json").writeText(results.toString(2))
             println("$line  [$tag]")
         }
@@ -125,10 +129,16 @@ class ModelBenchmarkHostTest {
     /** The app's pipeline: VAD splits the talk into phrases, each transcribed on its own. */
     private val leveling = System.getProperty("asr.bench.leveling") ?: "none"
 
+    /** A GTCRN model file: look for speech in a denoised copy of the audio. */
+    private val denoiserModel = System.getProperty("asr.bench.denoiser")?.takeIf { it.isNotBlank() }
+
     private fun longForm(recognizer: OfflineRecognizer, samples: FloatArray): String {
         val maxSegment = System.getProperty("asr.bench.maxSegment")?.toFloat() ?: Transcriber.MAX_SEGMENT_SECONDS
-        val vad = Vad(null, Transcriber.vadConfig(File(hostDir, "silero_vad.onnx").path, maxSegment))
-        val transcriber = Transcriber(recognizer, vad, levelSegments = leveling == "segment")
+        val vad = Vad(null, Transcriber.vadConfig(File(hostDir, "silero_vad.onnx").path))
+        val denoiser = denoiserModel?.let {
+            OnlineSpeechDenoiser(null, OnlineSpeechDenoiserConfig(OfflineSpeechDenoiserModelConfig(gtcrn = OfflineSpeechDenoiserGtcrnModelConfig(it))))
+        }
+        val transcriber = Transcriber(recognizer, vad, maxPhraseSeconds = maxSegment, denoiser = denoiser, levelSegments = leveling == "segment")
         val leveler = if (leveling == "stream") LevelNormalizer(16_000) else null
         var i = 0
         while (i < samples.size) {
@@ -138,7 +148,10 @@ class ModelBenchmarkHostTest {
             i += n
         }
         leveler?.let { transcriber.accept(it.flush()) }
-        return transcriber.finish().joinToString(" ") { it.text }.also { vad.release() }
+        return transcriber.finish().joinToString(" ") { it.text }.also {
+            vad.release()
+            denoiser?.release()
+        }
     }
 
     private fun readWav(f: File): FloatArray {

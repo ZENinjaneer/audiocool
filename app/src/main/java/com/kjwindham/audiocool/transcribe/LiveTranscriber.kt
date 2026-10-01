@@ -1,6 +1,7 @@
 package com.kjwindham.audiocool.transcribe
 
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
+import com.k2fsa.sherpa.onnx.OnlineSpeechDenoiser
 import com.k2fsa.sherpa.onnx.Vad
 import com.kjwindham.audiocool.data.TranscriptSegment
 
@@ -25,6 +26,7 @@ class LiveTranscriber(
     private val vad: Vad,
     private val onSegment: (TranscriptSegment) -> Unit,
     private val onSpeaking: (Boolean) -> Unit = {},
+    private val denoiser: OnlineSpeechDenoiser? = null,
 ) {
     sealed interface Result {
         /** Transcribed to the end of the audio. */
@@ -41,7 +43,7 @@ class LiveTranscriber(
         val emitted = ArrayList<TranscriptSegment>()
         fun stopped(error: Throwable? = null) = Result.Stopped(emitted.toList(), emitted.lastOrNull()?.endMs ?: 0L, error)
         try {
-            val transcriber = Transcriber(recognizer, vad, onSegment = {
+            val transcriber = Transcriber(recognizer, vad, maxPhraseSeconds = Transcriber.LIVE_MAX_SEGMENT_SECONDS, denoiser = denoiser, onSegment = {
                 emitted += it
                 onSegment(it)
             })
