@@ -5,6 +5,13 @@ recording when you started typing it; tap a note to play from just before that m
 
 - Recording runs in a foreground service, so it continues with the screen off or in another app.
 - Notes typed while replaying link to the playback position. ★ marks the current moment.
+- **Photos:** tap the camera in the note box to photograph a slide. The photo becomes a note linked
+  to that moment; tap it to see it full screen and play the recording from when it was taken. Photos
+  can also come from the gallery (⋮ › Add photos from gallery): ones taken during a recording, e.g.
+  with the camera app, land at the moment they were taken. Photos are saved upright at up to 2560 px.
+- **Thumbnails and gallery view:** a session's first photo becomes its thumbnail (long-press another
+  photo to use it instead). The grid button on the main screen switches between the list and a
+  gallery of thumbnails with each session's name underneath; search results show them too.
 - **Spoken notes:** hold the mic button next to the note box and say the note; it's transcribed on
   the phone and linked to the moment you started speaking (a quick tap listens hands-free until the
   next tap). With a headset plugged in or paired, notes are heard through the headset's mic while the
@@ -27,7 +34,7 @@ recording when you started typing it; tap a note to play from just before that m
   session's transcript. Tapping a result plays from that moment.
 - **Backup:** pick a folder (⋮ › Backup & restore) and every session (audio, notes, transcript) is
   copied there automatically. The copy survives uninstalling; *Restore from a backup* brings it back.
-- Share sends the notes as Markdown (with the transcript) plus the audio files.
+- Share sends the notes as Markdown (with the transcript) plus the audio files and photos.
 - Audio is recorded as AAC in ADTS framing (`.aac`), which stays playable even if the app is killed
   mid-recording, then converted to `.m4a` without re-encoding so long recordings open and seek instantly.
 

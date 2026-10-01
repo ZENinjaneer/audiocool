@@ -61,7 +61,9 @@ fun sessionMarkdown(session: Session, includeTranscript: Boolean = false): Strin
     appendLine()
     for (n in session.orderedNotes()) {
         val label = noteLabel(session, n)
-        appendLine(if (label != null) "- [$label] ${n.text}" else "- ${n.text}")
+        // A photo shows as an image (its file travels with the notes when shared or backed up).
+        val text = n.photo?.let { "![${n.text.ifBlank { "Photo" }}]($it)" } ?: n.text
+        appendLine(if (label != null) "- [$label] $text" else "- $text")
     }
     if (recs.isNotEmpty()) {
         appendLine()

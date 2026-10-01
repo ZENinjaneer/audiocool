@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,8 +19,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridItemSpanScope
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -44,6 +51,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -112,6 +120,7 @@ fun SessionListScreen(
     val context = LocalContext.current
     val prefs = remember { Prefs(context) }
     var offerDismissed by remember { mutableStateOf(prefs.speechModelOfferDismissed) }
+    var galleryView by remember { mutableStateOf(prefs.galleryView) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val sorted = remember(sessions) { sessions.sortedByDescending { it.updatedAt } }
@@ -163,6 +172,15 @@ fun SessionListScreen(
                         }
                     } else {
                         IconButton(onClick = { searching = true }) { Icon(Icons.Filled.Search, contentDescription = "Search") }
+                        IconButton(onClick = {
+                            galleryView = !galleryView
+                            prefs.galleryView = galleryView
+                        }) {
+                            Icon(
+                                if (galleryView) AppIcons.List else AppIcons.Gallery,
+                                contentDescription = if (galleryView) "Show as a list" else "Show as a gallery",
+                            )
+                        }
                         Box {
                             IconButton(onClick = { showMenu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
@@ -230,13 +248,17 @@ fun SessionListScreen(
             SearchResults(hits, searched = hitsFor == query, sessions, query, Modifier.fillMaxSize().padding(padding), onOpenHit)
             return@Scaffold
         }
-        LazyColumn(
+        // One grid for both views: a single column of cards, or tiles with the title under the thumbnail.
+        val wide: LazyGridItemSpanScope.() -> GridItemSpan = { GridItemSpan(maxLineSpan) }
+        LazyVerticalGrid(
+            columns = if (galleryView) GridCells.Adaptive(minSize = 150.dp) else GridCells.Fixed(1),
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(if (galleryView) 12.dp else 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             if (searching) {
-                item(key = "search-hint") {
+                item(key = "search-hint", span = wide) {
                     Text(
                         "Search your notes and everything that was said.",
                         style = MaterialTheme.typography.bodyMedium,
@@ -247,7 +269,7 @@ fun SessionListScreen(
             }
             val activeId = rec.sessionId
             if (rec.status != RecorderController.Status.IDLE && activeId != null) {
-                item(key = "recording") {
+                item(key = "recording", span = wide) {
                     RecordingBanner(
                         title = sessions.firstOrNull { it.id == activeId }?.title.orEmpty(),
                         elapsedMs = rec.elapsedMs,
@@ -259,7 +281,7 @@ fun SessionListScreen(
             // Transcription is on by default but needs a one-time download; offer it up front.
             val downloading = transcription.phase == TranscriptionController.Phase.DOWNLOADING_MODEL
             if (!searching && !transcription.modelReady && autoTranscribe && (downloading || !offerDismissed || transcription.error != null)) {
-                item(key = "speech-model") {
+                item(key = "speech-model", span = wide) {
                     SpeechModelCard(
                         transcription,
                         onDownload = TranscriptionController::downloadModel,
@@ -272,10 +294,14 @@ fun SessionListScreen(
                 }
             }
             if (sorted.isEmpty()) {
-                item(key = "empty") { EmptyState() }
+                item(key = "empty", span = wide) { EmptyState() }
             }
             items(sorted, key = { it.id }) { s ->
-                SessionCard(s, onClick = { onOpen(s.id) }, onRename = { renaming = s }, onDelete = { deleting = s })
+                if (galleryView) {
+                    SessionTile(s, onClick = { onOpen(s.id) }, onRename = { renaming = s }, onDelete = { deleting = s })
+                } else {
+                    SessionCard(s, onClick = { onOpen(s.id) }, onRename = { renaming = s }, onDelete = { deleting = s })
+                }
             }
         }
     }
@@ -417,12 +443,20 @@ private fun SearchResults(
         groups.forEach { (sessionId, sessionHits) ->
             val session = byId[sessionId] ?: return@forEach
             item(key = "session:$sessionId") {
-                Text(
-                    session.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
-                )
+                Row(
+                    Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    session.thumbnailNote()?.photo?.let { photo ->
+                        PhotoThumbnail(
+                            SessionRepository.photoFile(session.id, photo),
+                            sizePx = 240,
+                            modifier = Modifier.size(width = 64.dp, height = 48.dp).clip(RoundedCornerShape(6.dp)),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                    }
+                    Text(session.title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                }
             }
             items(sessionHits, key = { if (it.kind == HitKind.NOTE) "note:${it.noteId}" else "said:${it.recId}:${it.atMs}" }) { hit ->
                 HitRow(session, hit, onOpenHit)
@@ -463,6 +497,7 @@ private fun HitRow(session: Session, hit: SearchHit, onOpenHit: (SearchHit) -> U
 @Composable
 private fun SessionCard(s: Session, onClick: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
+    val thumbnail = s.thumbnailNote()?.photo
     Box {
         Card(
             modifier = Modifier
@@ -470,22 +505,98 @@ private fun SessionCard(s: Session, onClick: () -> Unit, onRename: () -> Unit, o
                 .clip(CardDefaults.shape)
                 .combinedClickable(onClick = onClick, onLongClick = { menu = true }),
         ) {
-            Column(Modifier.padding(16.dp)) {
-                Text(s.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(4.dp))
+            Row(Modifier.padding(if (thumbnail != null) 12.dp else 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (thumbnail != null) {
+                    PhotoThumbnail(
+                        SessionRepository.photoFile(s.id, thumbnail),
+                        sizePx = 320,
+                        modifier = Modifier.size(width = 96.dp, height = 72.dp).clip(RoundedCornerShape(8.dp)),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(s.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        summary(s),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        SessionMenu(menu, onDismiss = { menu = false }, onRename, onDelete)
+    }
+}
+
+/** A session in the gallery view: its thumbnail (or a placeholder), with the title underneath. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SessionTile(s: Session, onClick: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit) {
+    var menu by remember { mutableStateOf(false) }
+    val thumbnail = s.thumbnailNote()?.photo
+    Box {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .combinedClickable(onClick = onClick, onLongClick = { menu = true })
+                .padding(bottom = 4.dp),
+        ) {
+            Box(
+                Modifier.fillMaxWidth().aspectRatio(4f / 3f).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.secondaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (thumbnail != null) {
+                    PhotoThumbnail(SessionRepository.photoFile(s.id, thumbnail), sizePx = 480, modifier = Modifier.fillMaxSize())
+                } else {
+                    Icon(AppIcons.Mic, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(36.dp))
+                }
+                if (s.recordings.isNotEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color.Black.copy(alpha = 0.6f),
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp),
+                    ) {
+                        Text(
+                            formatTime(s.totalDurationMs),
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+            }
+            Text(
+                s.title,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 4.dp, end = 4.dp, top = 6.dp),
+            )
+            if (s.title != defaultSessionTitle(s.createdAt)) {
                 Text(
-                    summary(s),
+                    formatDate(s.createdAt),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    modifier = Modifier.padding(horizontal = 4.dp),
                 )
             }
         }
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+        SessionMenu(menu, onDismiss = { menu = false }, onRename, onDelete)
+    }
+}
+
+@Composable
+private fun SessionMenu(expanded: Boolean, onDismiss: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit) {
+    Box {
+        DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
             DropdownMenuItem(
                 text = { Text("Rename") },
                 leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
                 onClick = {
-                    menu = false
+                    onDismiss()
                     onRename()
                 },
             )
@@ -493,7 +604,7 @@ private fun SessionCard(s: Session, onClick: () -> Unit, onRename: () -> Unit, o
                 text = { Text("Delete") },
                 leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
                 onClick = {
-                    menu = false
+                    onDismiss()
                     onDelete()
                 },
             )
@@ -506,11 +617,14 @@ private fun summary(s: Session): String {
     // A session still named after its start time doesn't need the date twice.
     if (s.title != defaultSessionTitle(s.createdAt)) parts += formatDate(s.createdAt)
     if (s.recordings.isNotEmpty()) parts += "${formatTime(s.totalDurationMs)} audio"
-    parts += when (s.notes.size) {
-        0 -> "no notes"
-        1 -> "1 note"
-        else -> "${s.notes.size} notes"
+    val photos = s.notes.count { it.photo != null }
+    val notes = s.notes.size - photos
+    when {
+        notes == 1 -> parts += "1 note"
+        notes > 1 -> parts += "$notes notes"
+        photos == 0 -> parts += "no notes"
     }
+    if (photos > 0) parts += if (photos == 1) "1 photo" else "$photos photos"
     return parts.joinToString(" · ")
 }
 

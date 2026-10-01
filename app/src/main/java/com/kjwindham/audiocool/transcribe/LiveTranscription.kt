@@ -94,6 +94,8 @@ object LiveTranscription {
         var vad: Vad? = null
         var denoiser: OnlineSpeechDenoiser? = null
         val result = try {
+            // Fail fast, before loading the speech engine, if the model's files have gone missing.
+            check(SpeechModel.isReady(context)) { "The speech model isn't downloaded" }
             recognizer = OfflineRecognizer(null, SpeechModel.recognizerConfig(context, THREADS))
             synchronized(recognizerLock) { sharedRecognizer = recognizer }
             vad = Vad(context.assets, Transcriber.vadConfig(VAD_ASSET))

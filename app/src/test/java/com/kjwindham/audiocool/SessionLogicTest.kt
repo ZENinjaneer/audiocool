@@ -28,6 +28,25 @@ class SessionLogicTest {
         Session("s", "Bio 101", createdAt = 0, updatedAt = 0, recordings = recordings, notes = notes)
 
     @Test
+    fun photosAreNotesAndTheFirstOneIsTheThumbnailUntilAnotherIsPicked() {
+        val late = Note("p2", "", createdAt = 5_000_000, "r1", 400_000, photo = "photo-p2.jpg")
+        val early = Note("p1", "Title slide", createdAt = 5_000_001, "r1", 30_000, photo = "photo-p1.jpg")
+        val s = session(listOf(rec1), listOf(late, Note("n1", "A thought", 1_100_000, "r1", 100_000), early))
+        assertEquals("p1", s.thumbnailNote()?.id)
+        assertEquals("p2", s.copy(thumbnail = "p2").thumbnailNote()?.id)
+        // A thumbnail that isn't a photo (any more) falls back to the first photo.
+        assertEquals("p1", s.copy(thumbnail = "n1").thumbnailNote()?.id)
+        assertNull(session(listOf(rec1), listOf(Note("n1", "A thought", 1_100_000))).thumbnailNote())
+
+        val back = SessionJson.decode(SessionJson.encode(s.copy(thumbnail = "p2")))
+        assertEquals("p2", back.thumbnail)
+        assertEquals(s.notes, back.notes)
+        assertEquals(listOf("photo-p2.jpg", "photo-p1.jpg"), back.photoFiles())
+        assertTrue(sessionMarkdown(s).contains("- [00:30] ![Title slide](photo-p1.jpg)"))
+        assertTrue(sessionMarkdown(s).contains("- [06:40] ![Photo](photo-p2.jpg)"))
+    }
+
+    @Test
     fun formatsTimes() {
         assertEquals("00:00", formatTime(0))
         assertEquals("00:00", formatTime(-5))

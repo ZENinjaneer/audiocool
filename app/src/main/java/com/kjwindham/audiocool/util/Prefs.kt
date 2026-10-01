@@ -11,6 +11,11 @@ class Prefs(context: Context) {
         get() = sp.getInt("lead_in_seconds", 3)
         set(value) = sp.edit { putInt("lead_in_seconds", value) }
 
+    /** Show sessions on the main screen as a grid of thumbnails rather than a list. */
+    var galleryView: Boolean
+        get() = sp.getBoolean("gallery_view", false)
+        set(value) = sp.edit { putBoolean("gallery_view", value) }
+
     /** "Not now" was chosen on the main screen's offer to download the speech model. */
     var speechModelOfferDismissed: Boolean
         get() = sp.getBoolean("speech_model_offer_dismissed", false)

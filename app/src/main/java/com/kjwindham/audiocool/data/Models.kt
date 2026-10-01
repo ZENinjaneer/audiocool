@@ -27,6 +27,8 @@ data class Note(
     val recId: String? = null,
     /** Position in the recording, excluding paused time, so it matches the audio file. */
     val offsetMs: Long? = null,
+    /** A photo (of a slide, say): a JPEG in the session's folder. [text] is then its caption. */
+    val photo: String? = null,
 )
 
 data class Session(
@@ -36,8 +38,17 @@ data class Session(
     val updatedAt: Long,
     val recordings: List<Recording> = emptyList(),
     val notes: List<Note> = emptyList(),
+    /** The photo note picked to stand for the session in lists; by default, the first photo. */
+    val thumbnail: String? = null,
 ) {
     val totalDurationMs: Long get() = recordings.sumOf { it.durationMs }
+
+    /** The photo files in this session's folder. */
+    fun photoFiles(): List<String> = notes.mapNotNull { it.photo }
+
+    /** The photo shown for this session in lists, if it has any. */
+    fun thumbnailNote(): Note? =
+        notes.firstOrNull { it.id == thumbnail && it.photo != null } ?: orderedNotes().firstOrNull { it.photo != null }
 
     fun recording(id: String?): Recording? = recordings.firstOrNull { it.id == id }
 

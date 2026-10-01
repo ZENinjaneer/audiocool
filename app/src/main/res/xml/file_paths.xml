@@ -2,4 +2,5 @@
 <paths>
     <files-path name="sessions" path="sessions/" />
     <cache-path name="share" path="share/" />
+    <cache-path name="capture" path="capture/" />
 </paths>

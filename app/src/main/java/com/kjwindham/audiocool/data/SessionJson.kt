@@ -10,6 +10,7 @@ object SessionJson {
         put("title", s.title)
         put("createdAt", s.createdAt)
         put("updatedAt", s.updatedAt)
+        s.thumbnail?.let { put("thumbnail", it) }
         put("recordings", JSONArray().apply {
             s.recordings.forEach { r ->
                 put(JSONObject().apply {
@@ -36,6 +37,7 @@ object SessionJson {
                         put("recId", n.recId)
                         put("offsetMs", n.offsetMs)
                     }
+                    n.photo?.let { put("photo", it) }
                 })
             }
         })
@@ -50,6 +52,7 @@ object SessionJson {
             title = o.optString("title", "Untitled"),
             createdAt = o.optLong("createdAt"),
             updatedAt = o.optLong("updatedAt"),
+            thumbnail = if (o.has("thumbnail")) o.getString("thumbnail") else null,
             recordings = List(recs.length()) { i ->
                 val r = recs.getJSONObject(i)
                 Recording(
@@ -74,6 +77,7 @@ object SessionJson {
                     createdAt = n.optLong("createdAt"),
                     recId = if (n.has("recId")) n.getString("recId") else null,
                     offsetMs = if (n.has("offsetMs")) n.getLong("offsetMs") else null,
+                    photo = if (n.has("photo")) n.getString("photo") else null,
                 )
             },
         )

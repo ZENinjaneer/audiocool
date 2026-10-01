@@ -1,6 +1,7 @@
 package com.kjwindham.audiocool
 
 import android.Manifest
+import android.app.Activity
 import android.app.Application
 import android.app.Notification
 import android.content.Intent
@@ -8,7 +9,9 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.graphics.Paint
 import android.net.Uri
+import android.provider.MediaStore
 import android.os.Looper
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -18,11 +21,14 @@ import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.isDialog
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.core.content.FileProvider
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.kjwindham.audiocool.audio.Dictation
@@ -73,6 +79,8 @@ class RecordAndNoteFlowTest {
     @Before
     fun grantPermissions() {
         shadowOf(app).grantPermissions(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
+        // FileProvider remembers the app's folders in a static cache, but each test gets new ones.
+        (FileProvider::class.java.getDeclaredField("sCache").apply { isAccessible = true }.get(null) as HashMap<*, *>).clear()
     }
 
     @After
@@ -82,6 +90,52 @@ class RecordAndNoteFlowTest {
         TranscriptionController.cancelAll()
         Dictation.recognizeForTest = null
         ShadowAudioRecord.clearSource()
+    }
+
+    @Test
+    fun aPhotoOfTheSlideIsLinkedToTheMomentAndBecomesTheThumbnail() {
+        compose.onNodeWithContentDescription("New session").performClick()
+        compose.onNodeWithText("Start recording").performClick()
+        advance(20)
+        compose.onNodeWithContentDescription("Take a photo").performClick()
+
+        // Play the camera app: save a "slide" where it was asked to, and report success.
+        val request = shadowOf(compose.activity).nextStartedActivityForResult.intent
+        assertEquals(MediaStore.ACTION_IMAGE_CAPTURE, request.action)
+        @Suppress("DEPRECATION")
+        val output = request.getParcelableExtra<Uri>(MediaStore.EXTRA_OUTPUT)!!
+        val slide = Bitmap.createBitmap(1600, 900, Bitmap.Config.ARGB_8888).apply {
+            Canvas(this).apply {
+                drawColor(android.graphics.Color.rgb(20, 40, 120))
+                drawRect(100f, 100f, 1500f, 260f, Paint().apply { color = android.graphics.Color.WHITE })
+            }
+        }
+        File(app.cacheDir, "capture/${output.lastPathSegment}").outputStream().use { slide.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+        shadowOf(compose.activity).receiveResult(request, Activity.RESULT_OK, Intent())
+        compose.waitUntil(10_000) { SessionRepository.sessions.value.single().notes.any { it.photo != null } }
+
+        val photo = SessionRepository.sessions.value.single().notes.single()
+        assertEquals(RecorderController.state.value.recId, photo.recId)
+        assertTrue("linked at ${photo.offsetMs}", photo.offsetMs!! in 19_000L..21_500L)
+        compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription("Photo").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Thumbnail").assertIsDisplayed()
+        screenshot("9-photo-note")
+
+        // Tapping it shows it full screen, with a way to hear what was being said.
+        compose.onAllNodesWithContentDescription("Photo").onFirst().performClick()
+        compose.onNodeWithText("Play from", substring = true).assertIsDisplayed()
+        compose.onNodeWithContentDescription("Close").performClick()
+
+        compose.onNodeWithContentDescription("Stop recording").performClick()
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("1 photo", substring = true).assertIsDisplayed()
+        letPhotosLoad()
+        screenshot("10-list-with-thumbnail")
+        compose.onNodeWithContentDescription("Show as a gallery").performClick()
+        compose.onNodeWithContentDescription("Show as a list").assertIsDisplayed()
+        assertTrue(Prefs(app).galleryView)
+        letPhotosLoad()
+        screenshot("11-gallery")
     }
 
     @Test
@@ -116,6 +170,12 @@ class RecordAndNoteFlowTest {
         shadowOf(Looper.getMainLooper()).idle()
         compose.waitUntil(5_000) { TranscriptionController.state.value.isPending(rec.sessionId!!, rec.recId!!) }
         compose.onNodeWithText("Live transcription needs the speech model", substring = true).assertDoesNotExist()
+    }
+
+    /** Photos are decoded off the main thread, which the test clock doesn't wait for. */
+    private fun letPhotosLoad() = repeat(10) {
+        Thread.sleep(50)
+        compose.waitForIdle()
     }
 
     private fun startedTranscriptionService(): Boolean =

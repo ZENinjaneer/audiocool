@@ -118,7 +118,7 @@ object BackupController {
             val print = fingerprint(session)
             if (fingerprints.optString(session.id) == print) continue
             try {
-                BackupManager.backUp(root, session) { SessionRepository.audioFile(session.id, it) }
+                BackupManager.backUp(root, session, SessionRepository.sessionDir(session.id))
                 fingerprints.put(session.id, print)
                 prefs.backupFingerprints = fingerprints.toString()
             } catch (e: Exception) {

@@ -1,12 +1,15 @@
 package com.kjwindham.audiocool.ui
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -19,9 +22,11 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -94,6 +99,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
@@ -114,6 +120,7 @@ import com.kjwindham.audiocool.audio.PlayerController
 import com.kjwindham.audiocool.audio.RecorderController
 import com.kjwindham.audiocool.data.Note
 import com.kjwindham.audiocool.data.NoteFocus
+import com.kjwindham.audiocool.data.Photos
 import com.kjwindham.audiocool.data.Recording
 import com.kjwindham.audiocool.data.Session
 import com.kjwindham.audiocool.data.SessionRepository
@@ -130,6 +137,7 @@ import com.kjwindham.audiocool.util.isEnterKeystroke
 import com.kjwindham.audiocool.util.noteLabel
 import com.kjwindham.audiocool.util.removeEnter
 import com.kjwindham.audiocool.util.shareSession
+import java.io.File
 import kotlinx.coroutines.launch
 
 /** A moment in one of the session's recordings. */
@@ -178,6 +186,12 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
     // Recordings waiting on the user to OK the one-time model download.
     var awaitingDownload by remember { mutableStateOf<List<String>?>(null) }
     var confirmLiveDownload by remember { mutableStateOf(false) }
+    // The photo note being looked at full screen.
+    var viewing by remember { mutableStateOf<String?>(null) }
+    // The photo the camera app is taking, and the moment it links to (kept if Android restarts the app meanwhile).
+    var capturePath by rememberSaveable(session.id) { mutableStateOf<String?>(null) }
+    var captureRec by rememberSaveable(session.id) { mutableStateOf<String?>(null) }
+    var captureMs by rememberSaveable(session.id) { mutableLongStateOf(-1L) }
 
     LaunchedEffect(rec.error) {
         rec.error?.let {
@@ -298,6 +312,37 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
         if (transcription.modelReady) TranscriptionController.enqueue(session.id, ids) else awaitingDownload = ids
     }
 
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { taken ->
+        val file = capturePath?.let(::File) ?: return@rememberLauncherForActivityResult
+        capturePath = null
+        if (taken && file.length() > 0) {
+            Photos.addTaken(context, session.id, file, captureRec, captureMs.takeIf { it >= 0 }) { ok -> if (!ok) toast("Couldn't read that photo.") }
+        } else {
+            file.delete()
+        }
+    }
+    val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(50)) { uris ->
+        if (uris.isNotEmpty()) {
+            Photos.addPicked(context, session.id, uris) { failed -> if (failed > 0) toast("Couldn't read $failed of those pictures.") }
+        }
+    }
+
+    /** Opens the camera; the photo links to this moment (when the button was tapped). */
+    fun takePhoto() {
+        val (file, uri) = Photos.newCapture(context)
+        val stamp = currentStamp()
+        capturePath = file.path
+        captureRec = stamp?.recId
+        captureMs = stamp?.offsetMs ?: -1L
+        try {
+            camera.launch(uri)
+        } catch (e: ActivityNotFoundException) {
+            capturePath = null
+            file.delete()
+            toast("There's no camera app to take a photo with.")
+        }
+    }
+
     fun playSegment(recording: Recording, segment: TranscriptSegment) {
         if (rec.status != RecorderController.Status.IDLE) {
             toast("Stop recording to play back")
@@ -332,6 +377,10 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
                             DropdownMenuItem(text = { Text("Rename") }, onClick = {
                                 showMenu = false
                                 renaming = true
+                            })
+                            DropdownMenuItem(text = { Text("Add photos from gallery") }, onClick = {
+                                showMenu = false
+                                gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                             })
                             if (desktop != null) {
                                 DropdownMenuItem(
@@ -402,7 +451,13 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
                     recordingHere = recordingHere,
                     canDictate = canDictate,
                     modifier = Modifier.weight(1f),
-                    onTap = { note -> if (note.offsetMs != null) playNote(note) else editing = note },
+                    onTap = { note ->
+                        when {
+                            note.photo != null -> viewing = note.id
+                            note.offsetMs != null -> playNote(note)
+                            else -> editing = note
+                        }
+                    },
                     onEdit = { editing = it },
                 )
             } else {
@@ -428,6 +483,7 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
                 onDraftChange = ::onDraftChange,
                 onSend = ::submitDraft,
                 onMark = { addNote("★ Marked", currentStamp()) },
+                onPhoto = ::takePhoto,
                 onDictateStart = {
                     val stamp = currentStamp()
                     Dictation.start(context, session.id, stamp?.recId, stamp?.offsetMs)
@@ -490,9 +546,26 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
             onDismiss = { confirmDelete = false },
         )
     }
+    viewing?.let { id -> session.notes.firstOrNull { it.id == id } }?.let { note ->
+        PhotoViewer(
+            file = SessionRepository.photoFile(session.id, note.photo!!),
+            label = noteLabel(session, note),
+            isThumbnail = session.thumbnailNote()?.id == note.id,
+            onPlay = if (note.offsetMs != null && session.recording(note.recId) != null) {
+                {
+                    viewing = null
+                    playNote(note)
+                }
+            } else {
+                null
+            },
+            onUseAsThumbnail = { SessionRepository.setThumbnail(session.id, note.id) },
+            onDismiss = { viewing = null },
+        )
+    }
     editing?.let { note ->
         TextInputDialog(
-            title = "Edit note",
+            title = if (note.photo != null) "Caption" else "Edit note",
             initial = note.text,
             singleLine = false,
             onConfirm = {
@@ -742,6 +815,7 @@ private fun NotesList(
     onEdit: (Note) -> Unit,
 ) {
     val notes = remember(session.notes, session.recordings) { session.orderedNotes() }
+    val thumbnailId = session.thumbnailNote()?.id
     val playerHere = player.sessionId == session.id && player.recId != null
     val currentId = if (playerHere && player.engaged) {
         highlightedNoteId(notes, player.recId, player.positionMs, player.focus)
@@ -791,9 +865,12 @@ private fun NotesList(
                 label = noteLabel(session, note),
                 highlighted = note.id == currentId,
                 dimmed = upcoming,
+                photo = note.photo?.let { SessionRepository.photoFile(session.id, it) },
+                isThumbnail = note.id == thumbnailId,
                 onTap = { onTap(note) },
                 onEdit = { onEdit(note) },
                 onDelete = { SessionRepository.deleteNote(session.id, note.id) },
+                onUseAsThumbnail = { SessionRepository.setThumbnail(session.id, note.id) },
             )
         }
     }
@@ -806,9 +883,12 @@ private fun NoteRow(
     label: String?,
     highlighted: Boolean,
     dimmed: Boolean,
+    photo: File?,
+    isThumbnail: Boolean,
     onTap: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onUseAsThumbnail: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     Box(Modifier.padding(horizontal = 8.dp, vertical = 2.dp)) {
@@ -835,17 +915,34 @@ private fun NoteRow(
                 }
                 Spacer(Modifier.width(12.dp))
             }
-            Text(note.text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f).padding(top = 1.dp))
+            if (photo != null) {
+                Column(Modifier.weight(1f)) {
+                    NotePhoto(photo, isThumbnail)
+                    if (note.text.isNotBlank()) Text(note.text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
+                }
+            } else {
+                Text(note.text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f).padding(top = 1.dp))
+            }
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(
-                text = { Text("Edit") },
+                text = { Text(if (photo == null) "Edit" else if (note.text.isBlank()) "Add a caption" else "Edit caption") },
                 leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
                 onClick = {
                     menu = false
                     onEdit()
                 },
             )
+            if (photo != null && !isThumbnail) {
+                DropdownMenuItem(
+                    text = { Text("Use as thumbnail") },
+                    leadingIcon = { Icon(AppIcons.Image, contentDescription = null) },
+                    onClick = {
+                        menu = false
+                        onUseAsThumbnail()
+                    },
+                )
+            }
             DropdownMenuItem(
                 text = { Text("Delete") },
                 leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
@@ -854,6 +951,33 @@ private fun NoteRow(
                     onDelete()
                 },
             )
+        }
+    }
+}
+
+/** A photo note's picture at its own shape (up to a height), marked if it's the session's thumbnail. */
+@Composable
+private fun NotePhoto(file: File, isThumbnail: Boolean) {
+    val image = rememberPhoto(file, 1024)
+    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
+        if (image != null) {
+            Image(
+                image,
+                contentDescription = "Photo",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp).aspectRatio(image.width.toFloat() / image.height),
+            )
+        } else {
+            Spacer(Modifier.fillMaxWidth().aspectRatio(16f / 9f))
+        }
+        if (isThumbnail) {
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = Color.Black.copy(alpha = 0.6f),
+                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+            ) {
+                Text("Thumbnail", color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+            }
         }
     }
 }
@@ -868,6 +992,7 @@ private fun Composer(
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
     onMark: () -> Unit,
+    onPhoto: () -> Unit,
     onDictateStart: () -> Unit,
     onDictateStop: () -> Unit,
 ) {
@@ -898,6 +1023,12 @@ private fun Composer(
                     onValueChange = onDraftChange,
                     modifier = Modifier.weight(1f),
                     placeholder = { Text(if (canStamp) "Type a note, Enter adds it" else "Type a note") },
+                    // A photo of a slide is a note too; like a messaging app, the camera is in the box until you type.
+                    trailingIcon = if (draft.isEmpty()) {
+                        { IconButton(onClick = onPhoto) { Icon(AppIcons.Camera, contentDescription = "Take a photo") } }
+                    } else {
+                        null
+                    },
                     maxLines = 5,
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     shape = RoundedCornerShape(24.dp),

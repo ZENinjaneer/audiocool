@@ -58,8 +58,8 @@ android {
         applicationId = "com.kjwindham.audiocool"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.4.1"
+        versionCode = 7
+        versionName = "1.5"
         // The speech engine is native code; ship only the 64-bit ARM build every current phone uses.
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -148,6 +148,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
     // Scans the desktop's pairing QR code with Google's scanner (no camera permission needed).
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")

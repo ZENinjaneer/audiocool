@@ -52,6 +52,8 @@ object SessionRepository {
 
     fun audioFile(sessionId: String, rec: Recording): File = File(sessionDir(sessionId), rec.file)
 
+    fun photoFile(sessionId: String, name: String): File = File(sessionDir(sessionId), name)
+
     fun get(id: String): Session? = _sessions.value.firstOrNull { it.id == id }
 
     fun create(title: String): Session {
@@ -114,8 +116,14 @@ object SessionRepository {
         s.copy(notes = s.notes.map { if (it.id == noteId) it.copy(text = text) else it })
     }
 
-    fun deleteNote(sessionId: String, noteId: String) =
-        update(sessionId) { s -> s.copy(notes = s.notes.filterNot { it.id == noteId }) }
+    fun deleteNote(sessionId: String, noteId: String) {
+        val photo = get(sessionId)?.notes?.firstOrNull { it.id == noteId }?.photo
+        update(sessionId) { s -> s.copy(notes = s.notes.filterNot { it.id == noteId }, thumbnail = s.thumbnail.takeIf { it != noteId }) }
+        if (photo != null) io.launch { photoFile(sessionId, photo).delete() }
+    }
+
+    /** Shows the photo note [noteId] for the session in lists. */
+    fun setThumbnail(sessionId: String, noteId: String) = update(sessionId) { it.copy(thumbnail = noteId) }
 
     /** Waits for queued disk writes and deletes to finish; for tests. */
     @VisibleForTesting

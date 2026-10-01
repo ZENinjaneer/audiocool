@@ -9,7 +9,7 @@ import com.kjwindham.audiocool.data.Session
 import com.kjwindham.audiocool.data.SessionRepository
 import java.io.File
 
-/** Opens the share sheet with the notes (as text, and as a .md file with the transcript) plus the audio files. */
+/** Opens the share sheet with the notes (as text, and as a .md file with the transcript) plus the audio and photos. */
 fun shareSession(context: Context, session: Session) {
     val markdown = sessionMarkdown(session)
     val dir = File(context.cacheDir, "share").apply {
@@ -26,6 +26,10 @@ fun shareSession(context: Context, session: Session) {
     session.recordings
         .map { SessionRepository.audioFile(session.id, it) }
         .filter { it.length() > 0 }
+        .forEach { uris += FileProvider.getUriForFile(context, authority, it) }
+    session.orderedNotes()
+        .mapNotNull { n -> n.photo?.let { SessionRepository.photoFile(session.id, it) } }
+        .filter { it.isFile }
         .forEach { uris += FileProvider.getUriForFile(context, authority, it) }
 
     val send = Intent(Intent.ACTION_SEND_MULTIPLE).apply {

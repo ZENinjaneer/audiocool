@@ -46,13 +46,13 @@ class BackupTest {
         val backupDir = File(tmp.root, BackupManager.folderName(created))
 
         // While recording, only the notes are backed up; the growing audio file waits until it's finished.
-        BackupManager.backUp(root, SessionRepository.get(created.id)!!) { audio(created, it) }
+        BackupManager.backUp(root, SessionRepository.get(created.id)!!, SessionRepository.sessionDir(created.id))
         assertFalse(File(backupDir, "recording-1.aac").exists())
         assertTrue(File(backupDir, "notes.md").readText().contains("Mitochondria"))
 
         SessionRepository.setRecordingDuration(created.id, "r1", 60_000)
         SessionRepository.setTranscript(created.id, "r1", listOf(TranscriptSegment(2_000, 5_000, "The powerhouse of the cell.")))
-        BackupManager.backUp(root, SessionRepository.get(created.id)!!) { audio(created, it) }
+        BackupManager.backUp(root, SessionRepository.get(created.id)!!, SessionRepository.sessionDir(created.id))
         assertEquals(1_000L, File(backupDir, "recording-1.aac").length())
         assertTrue(File(backupDir, "notes.md").readText().contains("[00:02] The powerhouse of the cell."))
 
@@ -61,7 +61,7 @@ class BackupTest {
         val converted = SessionRepository.get(created.id)!!.let { s ->
             s.copy(recordings = s.recordings.map { it.copy(file = "recording-1.m4a") })
         }
-        BackupManager.backUp(root, converted) { audio(created, it) }
+        BackupManager.backUp(root, converted, SessionRepository.sessionDir(created.id))
         assertFalse(File(backupDir, "recording-1.aac").exists())
         assertEquals(800L, File(backupDir, "recording-1.m4a").length())
         assertEquals(converted, SessionJson.decode(File(backupDir, "session.json").readText()))
@@ -78,5 +78,28 @@ class BackupTest {
         assertEquals(800L, audio(back, back.recordings.single()).length())
         // Restoring again adds nothing: the session is already there.
         assertEquals(0, restore(root))
+    }
+
+    @Test
+    fun photosAreBackedUpAndRestoredToo() {
+        val root = FileBackupFolder(tmp.root)
+        val created = SessionRepository.create("Chem")
+        File(SessionRepository.sessionDir(created.id).apply { mkdirs() }, "photo-p1.jpg").writeBytes(ByteArray(300) { 1 })
+        SessionRepository.addNote(created.id, Note("p1", "", 1_000L, photo = "photo-p1.jpg"))
+        val backupDir = File(tmp.root, BackupManager.folderName(created))
+        BackupManager.backUp(root, SessionRepository.get(created.id)!!, SessionRepository.sessionDir(created.id))
+        assertEquals(300L, File(backupDir, "photo-p1.jpg").length())
+
+        deleteSession(created.id)
+        SessionRepository.awaitIo()
+        assertEquals(1, restore(root))
+        assertEquals(300L, SessionRepository.photoFile(created.id, "photo-p1.jpg").length())
+
+        // Deleting the photo removes it from the next backup.
+        SessionRepository.deleteNote(created.id, "p1")
+        SessionRepository.awaitIo()
+        assertFalse(SessionRepository.photoFile(created.id, "photo-p1.jpg").exists())
+        BackupManager.backUp(root, SessionRepository.get(created.id)!!, SessionRepository.sessionDir(created.id))
+        assertFalse(File(backupDir, "photo-p1.jpg").exists())
     }
 }
