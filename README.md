@@ -49,6 +49,12 @@ tap the `.apk` under **Assets**, then open the download. Android asks you to all
 your browser the first time. On Samsung phones, Auto Blocker (Settings › Security and privacy) must
 be off while installing. A new version installs over the old one and keeps your recordings.
 
+**Updating:** [AudioCool Updater](https://github.com/ZENinjaneer/audiocool/releases/download/updater-1.0/AudioCoolUpdater.apk)
+(`updater/`) installs the latest release in one tap, downloading it itself and checking it before
+installing; if Android refuses, it shows the actual reason. Use it if a browser download misbehaves:
+Chrome has been seen to stall at 100% without finishing the file, which the installer then calls
+"package appears to be invalid".
+
 ## Build
 
 Needs JDK 17+ and the Android SDK (platform 35, build-tools 35.0.0). The first build downloads the
