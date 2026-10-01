@@ -157,6 +157,10 @@ class Registry:
             self._last_used = time.monotonic()
             return self._engine
 
+    def is_loaded(self, model_id: str) -> bool:
+        e = self._engine
+        return e is not None and e.id == model_id and e.loaded and e.device == self.device_for(self.specs[model_id])
+
     def touch(self) -> None:
         self._last_used = time.monotonic()
 

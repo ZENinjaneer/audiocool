@@ -288,8 +288,8 @@ label.field .hint { font-weight: 400; color: var(--muted); font-size: 13px; }
 }
 .title-edit:hover { background: var(--bg-hover); }
 .title-edit:focus { background: var(--bg-elev); border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
-.session-head { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 16px; }
-.session-head .grow { flex: 1 1 360px; min-width: 0; }
+.session-head { margin-bottom: 16px; }
+.session-sub { display: flex; gap: 12px 16px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-top: 6px; }
 .session-head .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .menu { position: relative; }
 .menu-pop {
@@ -404,7 +404,7 @@ mark { background: var(--mark); color: var(--mark-text); border-radius: 3px; pad
 /* ---- jobs ------------------------------------------------------------------------------- */
 
 .jobs { overflow: hidden; }
-.job { display: grid; grid-template-columns: 120px minmax(0, 1fr) 190px 150px auto; gap: 14px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.job { display: grid; grid-template-columns: 120px minmax(0, 1fr) 200px 130px 80px; gap: 14px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); }
 .job:last-child { border-bottom: 0; }
 .job .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .job .err-text { color: var(--err); font-size: 13px; word-break: break-word; }
@@ -461,7 +461,7 @@ pre.cmd { background: var(--bg-sunken); border: 1px solid var(--border); border-
   .pane-body.scroll { max-height: none; overflow: visible; }
   .pane-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
   .panes[data-tab="notes"] .pane-transcript, .panes[data-tab="transcript"] .pane-notes { display: none; }
-  .job { grid-template-columns: 100px minmax(0, 1fr) auto; }
+  .job { grid-template-columns: 100px minmax(0, 1fr) 80px; }
   .job .c-model, .job .c-time { display: none; }
 }
 @media (max-width: 820px) {

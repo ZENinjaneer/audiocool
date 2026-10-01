@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from . import audio
+from . import audio, models_cache
 from .config import Config
 from .engines import Registry, is_gpu_failure
 from .jobs import JobQueue
@@ -57,6 +57,9 @@ class App:
 
         info = None
         engine = None
+        if not self.registry.is_loaded(spec.id):
+            first_use = spec.repos and models_cache.status(spec.repos) != "ready"
+            progress(0.0, f"Downloading {spec.name} (first use only)" if first_use else f"Loading {spec.name}")
         try:
             engine = self.registry.engine(spec.id)
             result = engine.transcribe_file(path, progress, cancelled)

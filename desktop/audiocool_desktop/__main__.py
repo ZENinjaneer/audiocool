@@ -66,8 +66,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"\n{line}\n  AudioCool Desktop {__version__}\n{line}")
     print(f"  Web UI (this computer):   http://localhost:{args.port}/")
     if args.host in ("0.0.0.0", "::"):
-        for ip in lan or ["(no LAN address found; is Wi-Fi/Ethernet connected?)"]:
-            print(f"  Phone URL (same Wi-Fi):   http://{ip}:{args.port}" if lan else f"  Phone URL:                {ip}")
+        for ip in lan:
+            print(f"  Phone URL (same Wi-Fi):   http://{ip}:{args.port}")
+        if not lan:
+            print("  Phone URL:                none: no LAN address found (is Wi-Fi/Ethernet connected?)")
     else:
         print(f"  Listening on:             http://{args.host}:{args.port} (LAN access needs --host 0.0.0.0)")
     print(f"  Pairing code:             {config.token}")

@@ -20,7 +20,7 @@ class FakeEngine(Engine):
         self.calls: list[str] = []
         self.gate: threading.Event | None = None  # when set by a test, each run waits for it
 
-    def transcribe_file(self, path: str | Path, progress: Progress = lambda f: None, cancelled: IsCancelled = lambda: False) -> Result:
+    def transcribe_file(self, path: str | Path, progress: Progress = lambda f, phase=None: None, cancelled: IsCancelled = lambda: False) -> Result:
         self.calls.append(str(path))
         duration_ms = audio_io.probe_duration_ms(path)
         if self.gate is not None:

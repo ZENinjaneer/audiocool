@@ -16,7 +16,8 @@ from .segmenter import Word, build_segments, drop_fillers
 log = logging.getLogger(__name__)
 
 SR = audio_io.SAMPLE_RATE
-Progress = Callable[[float], None]
+#: progress(fraction 0..1, phase=None): phase is a short label such as "Transcribing".
+Progress = Callable[..., None]
 IsCancelled = Callable[[], bool]
 
 
@@ -34,8 +35,13 @@ class Result:
     chunks: int = 0
 
 
-def _noop(_: float) -> None:
+def _noop(fraction: float, phase: str | None = None) -> None:
     pass
+
+
+def _scaled(progress: Progress, start: float, span: float) -> Progress:
+    """Maps a sub-step's 0..1 progress onto [start, start + span] of the whole."""
+    return lambda f, phase=None: progress(start + span * f, phase)
 
 
 def _never() -> bool:
@@ -90,10 +96,11 @@ class Engine:
 
     def transcribe_file(self, path: str | Path, progress: Progress = _noop, cancelled: IsCancelled = _never) -> Result:
         t0 = time.monotonic()
+        progress(0.0, "Reading the audio")
         samples = audio_io.decode(path)
         t_decode = time.monotonic() - t0
         progress(0.03)
-        result = self.transcribe_array(samples, lambda f: progress(0.03 + 0.97 * f), cancelled)
+        result = self.transcribe_array(samples, _scaled(progress, 0.03, 0.97), cancelled)
         result.timings = {"decode": round(t_decode, 3), **result.timings}
         return result
 
@@ -104,13 +111,14 @@ class Engine:
             raise Cancelled()
         self.load()
         t0 = time.monotonic()
+        progress(0.0, "Finding speech")
         speech = vad.speech_segments(samples, max_speech_s=self.max_chunk_s)
         chunks = vad.make_chunks(speech, max_s=self.max_chunk_s)
         t_vad = time.monotonic() - t0
-        progress(0.04)
+        progress(0.04, "Transcribing")
         pieces = [samples[a:b] for a, b in chunks]
         t1 = time.monotonic()
-        words_per_chunk = self.recognize(pieces, [a / SR for a, _ in chunks], lambda f: progress(0.04 + 0.95 * f), cancelled) if pieces else []
+        words_per_chunk = self.recognize(pieces, [a / SR for a, _ in chunks], _scaled(progress, 0.04, 0.95), cancelled) if pieces else []
         t_asr = time.monotonic() - t1
         words = drop_fillers([w for ws in words_per_chunk for w in ws])
         segments = build_segments(words)

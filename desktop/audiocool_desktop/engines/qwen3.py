@@ -164,6 +164,7 @@ class Qwen3Engine(Engine):
             progress(0.85 * done / total)
 
         results: list[list[Word]] = [[] for _ in chunks]
+        progress(0.85, "Timing the words")
         todo = [i for i, t in enumerate(texts) if any(_kept(c) for c in t)]
         align_batches = batches_by_length([lengths[i] for i in todo], max_items=24 if gpu else 2, max_total=(24 if gpu else 2) * 30 * SR)
         done = 0

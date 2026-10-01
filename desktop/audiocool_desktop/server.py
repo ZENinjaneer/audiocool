@@ -196,7 +196,8 @@ def create_app(app: App, port: int = 8765) -> FastAPI:
         if not (client.startswith("127.") or client in local_addrs or client == "testclient"):
             return False
         host = (request.headers.get("host") or "").rsplit(":", 1)[0].strip("[]").lower()
-        return host in {"localhost", "127.0.0.1", "::1", "testserver", app.config.name.lower(), os.uname().nodename.lower()} | local_addrs
+        node = os.uname().nodename.lower()
+        return host in {"localhost", "127.0.0.1", "::1", "testserver", node, f"{node}.local", app.config.name.lower()} | local_addrs
 
     @api.middleware("http")
     async def guard(request: Request, call_next):

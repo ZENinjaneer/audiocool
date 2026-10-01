@@ -233,7 +233,7 @@
     const running = s.activeJobs.find((j) => j.status === 'running');
     if (running) {
       const pct = Math.round(running.progress * 100);
-      return html`<span class="badge accent run"><span class="dot"></span>Transcribing ${pct}%</span><div class="progress"><div style="width:${pct}%"></div></div>`;
+      return html`<span class="badge accent run" title="${running.phase || ''}"><span class="dot"></span>Transcribing ${pct}%</span><div class="progress ${pct === 0 ? 'indet' : ''}"><div style="width:${pct}%"></div></div>`;
     }
     if (s.activeJobs.length) return html`<span class="badge accent run"><span class="dot"></span>Queued</span>`;
     const recs = s.recordings;
@@ -406,15 +406,14 @@
       el.innerHTML = out(html`
         <a class="back" href="#/">${icon('left')}Library</a>
         <div class="session-head">
-          <div class="grow">
-            <h1 class="title-edit" id="title" contenteditable="true" spellcheck="false" title="Click to rename">${sess.title || 'Untitled'}</h1>
-            <div class="session-meta" style="margin-top:4px">
+          <h1 class="title-edit" id="title" contenteditable="true" spellcheck="false" title="Click to rename">${sess.title || 'Untitled'}</h1>
+          <div class="session-sub">
+            <div class="session-meta">
               <span>${fmtDateTime(sess.createdAt)}</span><span class="sep"></span>
               <span>${recs.length ? fmtDuration(data.summary.durationMs) : 'no audio'}</span><span class="sep"></span>
               <span>${plural(sess.notes.length, 'note')}</span>
               ${recs.length > 1 ? html`<span class="sep"></span><span>${recs.length} recordings</span>` : ''}
             </div>
-          </div>
           <div class="actions">
             ${recs.length ? html`<div class="split-btn" title="Transcribe every recording in this session">
               <select class="select" id="model" aria-label="Model">
@@ -438,6 +437,7 @@
                 <button id="delete" class="danger">${icon('trash')}<span>Delete session…<span class="desc">Removes the folder from the library</span></span></button>
               </div>
             </div>
+          </div>
           </div>
         </div>
         <div id="banner"></div>
@@ -482,6 +482,7 @@
       });
       const tb = $('#transcribe', el);
       if (tb) tb.addEventListener('click', async () => {
+        if (data.summary.recordings.some((x) => x.edited) && !confirm('Transcribing again replaces the transcript, including the lines you corrected. Continue?')) return;
         tb.disabled = true;
         try {
           const model = $('#model', el).value;
@@ -792,7 +793,7 @@
         const what = nRecs > 1 ? `recording ${recNum(j.recordingId)} of ${nRecs}` : 'the recording';
         box.innerHTML = out(html`<div class="card job-banner">
           <div class="grow"><strong>${run ? `Transcribing ${what}` : 'Waiting in the queue'}</strong>
-            <span class="muted"> · ${modelName(j.model)}${run ? ` · ${pct}%` : ''}${active.length > 1 ? ` · ${active.length - 1} more queued` : ''}</span>
+            <span class="muted"> · ${modelName(j.model)}${run && j.phase ? ` · ${j.phase}` : ''}${run ? ` · ${pct}%` : ''}${active.length > 1 ? ` · ${active.length - 1} more queued` : ''}</span>
             <div class="progress ${run && pct === 0 ? 'indet' : ''}"><div style="width:${run ? Math.max(pct, 2) : 0}%"></div></div></div>
           <button class="btn sm" id="cancel-job">Cancel</button></div>`);
         $('#cancel-job', box).addEventListener('click', async () => {
@@ -926,7 +927,7 @@
             <div style="min-width:0">
               <div class="title">${j.sessionTitle ? html`<a href="#/session/${encodeURIComponent(j.sessionId)}">${j.sessionTitle}</a>` : html`<span class="muted">Deleted session</span>`}
                 ${j.recordingCount > 1 ? html`<span class="muted small"> · recording ${j.recordingNumber}</span>` : ''}</div>
-              ${j.status === 'running' ? html`<div class="progress" style="margin-top:6px"><div style="width:${Math.max(2, Math.round(j.progress * 100))}%"></div></div>` : ''}
+              ${j.status === 'running' ? html`<div class="progress" style="margin-top:6px"><div style="width:${Math.max(2, Math.round(j.progress * 100))}%"></div></div>${j.phase ? html`<div class="muted small" style="margin-top:3px">${j.phase}…</div>` : ''}` : ''}
               ${j.status === 'error' && j.error !== 'Cancelled' ? html`<div class="err-text">${j.error}</div>` : ''}
               ${j.info ? html`<div class="muted small">${j.info}</div>` : ''}
             </div>
@@ -1034,7 +1035,7 @@
             <div><h3>Pairing code</h3><div class="code" id="code">${Array.from(info.token).map((c, i) => html`<span${raw(i === 3 ? ' style="margin-right:.6em"' : '')}>${c}</span>`)}</div></div>
             <div><h3>Address</h3><div class="url-list">${info.urls.length ? info.urls.map((u, i) => html`<div class="row"><code>${u}</code>${info.urls.length > 1 ? html`<button class="btn sm ${i === shown ? 'primary' : ''}" data-show="${i}">${i === shown ? 'Shown' : 'Show QR'}</button>` : ''}</div>`) : html`<span class="muted">none found</span>`}</div></div>
             <ol class="steps">
-              <li>On the phone, open AudioCool and choose <strong>Pair with desktop</strong>.</li>
+              <li>Open AudioCool on the phone and start pairing with a desktop.</li>
               <li>Scan this QR code, or type the address and the code.</li>
               <li>If the phone can't connect, allow port ${info.port} through the Windows firewall (below).</li>
             </ol>

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 import re
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from conftest import T0, aac_bytes, phone_session
+from conftest import T0, phone_session
 
 API_ROUTES = [
     ("GET", "/api/v1/ping"),

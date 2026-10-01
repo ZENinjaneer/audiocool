@@ -40,6 +40,7 @@ class JobQueue:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._progress: dict[str, float] = {}
+        self._phase: dict[str, str] = {}  # what a running job is doing, e.g. "Loading the model"
         self._cancel: set[str] = set()
         self._running: str | None = None
         self._idle = threading.Event()
@@ -88,6 +89,7 @@ class JobQueue:
             "error": r["error"],
             "device": r["device"],
             "info": r["info"],
+            "phase": self._phase.get(r["id"]) if r["status"] == "running" else None,
             "createdAt": r["created_at"],
             "startedAt": r["started_at"],
             "finishedAt": r["finished_at"],
@@ -164,6 +166,7 @@ class JobQueue:
                 (status, error, 1.0 if status == "done" else self._progress.get(job_id, 0.0), now_ms(), device, info, job_id),
             )
             self._progress.pop(job_id, None)
+            self._phase.pop(job_id, None)
             self._cancel.discard(job_id)
 
     def _prune(self) -> None:
@@ -236,9 +239,11 @@ class JobQueue:
         job_id = job["id"]
         last_write = [0.0]
 
-        def progress(fraction: float) -> None:
+        def progress(fraction: float, phase: str | None = None) -> None:
             fraction = min(max(float(fraction), 0.0), 1.0)
             self._progress[job_id] = fraction
+            if phase:
+                self._phase[job_id] = phase
             now = time.monotonic()
             if now - last_write[0] > 2.0:
                 last_write[0] = now
@@ -259,6 +264,7 @@ class JobQueue:
                 with self._lock:
                     self._db.execute("UPDATE jobs SET status='queued', progress=0, started_at=NULL WHERE id=?", (job_id,))
                     self._progress.pop(job_id, None)
+                    self._phase.pop(job_id, None)
             else:
                 name = type(e).__name__
                 message = "Cancelled" if name == "Cancelled" else (str(e) or name)
