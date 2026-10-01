@@ -114,8 +114,9 @@ into the phone's backup folder.
 
 The app's newer fields are understood: a note's `photo` (a JPEG in the session folder; the web UI
 shows it), `photoText` (text read from the photo; searched, as on the phone) and the session's
-`thumbnail` (shown in the library). Photos aren't part of the phone API (it moves recordings
-only); they arrive with imported backups or when the library is the backup folder itself.
+`thumbnail` (shown in the library). The photo files arrive with imported backups, when the library
+is the backup folder itself, or through an optional extension of the upload API (below); the
+app's current desktop sync sends recordings only.
 
 **Import** (web UI): a phone backup folder (or one session folder) by path, e.g.
 `/mnt/c/Users/you/Documents/AudioCool Backup`, or a zip of it by drag and drop. The newer copy of
@@ -242,6 +243,12 @@ leaves the previous file untouched (a `Content-Length` mismatch is a 400). If th
 length differs from the audio a desktop transcript was made from by more than 2 s, that
 transcript is dropped.
 
+*Extension (not in the original contract, ignored by clients that don't use it):* photos attached
+to notes travel the same way. List them in `files` (`"photo-<id>.jpg": <bytes>`) and they show up
+in `needed` like recordings; upload them with this route. Only names matching
+`photo-[\w-]+\.(jpg|jpeg|png|webp)` that a note's `photo` refers to are accepted. A photo no note
+uses any more is deleted when the session is next sent, as the app's backup does.
+
 **`POST /api/v1/sessions/{id}/transcribe`** — body `{"model": "<id>" | null, "recordingIds": [...] | null}`
 (the body may be empty) → `202 {"jobs": [{"id": "5f2c9a0e1b7d", "recordingId": "r1", "model": "qwen3-asr-1.7b", "status": "queued"}]}`.
 `null` model = the default model; `null` recordings = every recording whose audio is uploaded.
@@ -281,6 +288,7 @@ None in request/response shapes or status codes. Choices the contract left open:
   history; `session` carries the title as the desktop has it (a title edited in the web UI wins
   until the phone renames the session) and `transcriptModel` on each transcribed recording.
 - Times above the year 9999 are rejected as bad input.
+- Addition: `files` and the upload route also accept note photos (see the extension above).
 - "Localhost only" for the web UI means requests from this computer: loopback, or one of the PC's
   own addresses (e.g. opening `http://192.168.x.x:8765/` on the PC itself).
 

@@ -89,6 +89,26 @@ def test_photos_from_a_backup(env):
     assert "[00:00] [photo photo-n1.jpg] Slide 3" in txt
 
 
+def test_photos_through_the_api_extension(env):
+    """Photos can also be uploaded like recordings (an addition to the contract)."""
+    data = aac_bytes(env.tmp, 2.0)
+    s = phone_session(notes=[
+        {"id": "n1", "text": "slide", "createdAt": T0, "recId": "r1", "offsetMs": 100, "photo": "photo-n1.jpg"},
+    ])
+    files = {"recording-1.m4a": len(data), "photo-n1.jpg": len(JPEG), "photo-other.jpg": 5}
+    assert env.put_session(s, files).json() == {"needed": ["recording-1.m4a", "photo-n1.jpg"]}
+    assert env.upload(s["id"], "photo-other.jpg", JPEG).status_code == 404  # no note uses it
+    assert env.upload(s["id"], "photo-n1.jpg", JPEG).status_code == 204
+    assert env.put_session(s, files).json() == {"needed": ["recording-1.m4a"]}
+    assert env.ui("GET", f"/sessions/{s['id']}/photo/photo-n1.jpg").content == JPEG
+    summary = env.ui("GET", "/sessions").json()["sessions"][0]
+    assert summary["thumbnail"].endswith("/photo/photo-n1.jpg")
+    # The note is deleted on the phone: its photo goes too.
+    s["notes"] = []
+    env.put_session(s, {"recording-1.m4a": len(data)})
+    assert not list(env.library.glob("*/photo-n1.jpg"))
+
+
 def test_search_finds_text_on_photos(env):
     _backup_with_photos(env.tmp / "backup")
     env.ui("POST", "/import/path", json={"path": str(env.tmp / "backup")})

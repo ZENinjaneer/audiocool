@@ -355,19 +355,21 @@ def create_app(app: App, port: int = 8765) -> FastAPI:
     @api.put("/api/v1/sessions/{sid}/files/{name}", status_code=204)
     async def put_file(sid: str, name: str, request: Request):
         check_session_id(sid)
-        if not AUDIO_NAME.fullmatch(name):
-            raise BadInput("file names must look like recording-N.aac or recording-N.m4a")
+        is_photo = bool(PHOTO_NAME.fullmatch(name))  # extension: photos attached to notes
+        if not AUDIO_NAME.fullmatch(name) and not is_photo:
+            raise BadInput("file names must look like recording-N.aac or recording-N.m4a (or photo-ID.jpg)")
         entry = await run_in_threadpool(lib.get, sid)
         if entry is None:
             raise NotFound(f"unknown session {sid}")
-        if not any(r["file"] == name for r in entry.session.get("recordings", [])):
+        known = entry.photo_names() if is_photo else [r["file"] for r in entry.session.get("recordings", [])]
+        if name not in known:
             raise NotFound(f"{name} is not a file of this session")
         tmp = entry.folder / f".{name}.{secrets.token_hex(6)}.part"
         try:
             await receive_to_file(request, tmp)
         except ClientDisconnect:
             return Response(status_code=400)
-        await run_in_threadpool(lib.commit_audio, sid, name, tmp)
+        await run_in_threadpool(lib.commit_photo if is_photo else lib.commit_audio, sid, name, tmp)
         return Response(status_code=204)
 
     @api.post("/api/v1/sessions/{sid}/transcribe", status_code=202)

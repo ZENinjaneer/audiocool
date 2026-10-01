@@ -375,17 +375,37 @@ class Library:
             else:
                 folder, sidecar = self._new_folder(session), new_sidecar()
             _apply_title_rule(session.get("title", ""), sidecar)
-            self._write(folder, session, sidecar)
+            entry = self._write(folder, session, sidecar)
             needed = []
-            for rec in session.get("recordings", []):
-                name = rec["file"]
+            # Recordings, then (an extension of the API) photos attached to notes.
+            for name in [r["file"] for r in session.get("recordings", [])] + entry.photo_names():
                 if name not in files:
                     continue
                 path = folder / name
                 if not path.is_file() or path.stat().st_size != files[name]:
                     needed.append(name)
             self._remove_replaced_audio(folder, session)
+            self._remove_unused_photos(entry)
             return needed
+
+    @staticmethod
+    def _remove_unused_photos(entry: Entry) -> None:
+        """Deletes photos no note uses any more (e.g. deleted on the phone), as the app's backup does."""
+        used = set(entry.photo_names())
+        for path in entry.folder.iterdir():
+            if PHOTO_NAME.fullmatch(path.name) and path.name not in used:
+                log.info("Removing %s/%s (no note uses it)", entry.folder.name, path.name)
+                path.unlink(missing_ok=True)
+
+    def commit_photo(self, session_id: str, name: str, tmp: Path) -> None:
+        """Moves an uploaded photo into place (atomically)."""
+        with self._lock:
+            entry = self.get(session_id)
+            if entry is None or name not in entry.photo_names():
+                tmp.unlink(missing_ok=True)
+                raise NotFound(f"{name} is not a photo of session {session_id}")
+            os.replace(tmp, entry.folder / name)
+            self._remember(entry)  # the summary's thumbnail may change
 
     def _remove_replaced_audio(self, folder: Path, session: dict) -> None:
         """Deletes audio the session no longer uses once its replacement is here (.aac -> .m4a)."""
