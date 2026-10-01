@@ -111,6 +111,23 @@ class RecordAndNoteFlowTest {
     }
 
     @Test
+    fun transcriptsFromTheOldModelCanBeRedone() {
+        val session = SessionRepository.create("Chem")
+        SessionRepository.addRecording(session.id, Recording("r1", "recording-1.m4a", 1_000L, 60_000))
+        // Made before this version (no model recorded): the old, less accurate model.
+        SessionRepository.setTranscript(session.id, "r1", listOf(TranscriptSegment(1_000, 3_000, "old words")))
+        compose.waitForIdle()
+        compose.onNodeWithText("Chem").performClick()
+        compose.onNodeWithText("Transcript").performClick()
+        compose.onNodeWithText("Made with the older, less accurate speech model.").assertIsDisplayed()
+
+        compose.onNodeWithText("Transcribe again").performClick()
+        compose.onNodeWithText("Download and transcribe").performClick()
+        compose.waitForIdle()
+        assertTrue(TranscriptionController.state.value.isPending(session.id, "r1"))
+    }
+
+    @Test
     fun transcribeAsksBeforeDownloadingTheModelThenQueuesTheSession() {
         val session = SessionRepository.create("History")
         SessionRepository.addRecording(session.id, Recording("r1", "recording-1.m4a", 1_000L, 60_000))
