@@ -265,6 +265,17 @@ label.field .hint { font-weight: 400; color: var(--muted); font-size: 13px; }
 }
 .session-date .m { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .session-date .d { font-size: 21px; font-weight: 700; }
+.session-thumb { width: 52px; height: 52px; border-radius: 12px; object-fit: cover; border: 1px solid var(--border); background: var(--bg-sunken); }
+.note-item.has-photo { align-items: start; }
+.note-item.has-photo .chip { margin-top: 3px; }
+.note-photo { display: block; margin: 2px 0 6px; }
+.note-photo img { display: block; max-width: 100%; max-height: 200px; border-radius: 10px; border: 1px solid var(--border); cursor: zoom-in; background: var(--bg-sunken); }
+.photo-missing { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+.photo-missing svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.photo-text { margin-top: 4px; font-size: 13px; color: var(--text-2); }
+.photo-text summary { cursor: pointer; color: var(--muted); }
+.photo-text div { white-space: pre-wrap; margin-top: 4px; padding: 8px 10px; border-radius: 8px; background: var(--bg-sunken); border: 1px solid var(--border); }
+.hit .kind.photo svg { stroke: var(--ok); }
 .session-title { font-weight: 620; font-size: 16px; letter-spacing: -.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-meta { color: var(--muted); font-size: 13.5px; margin-top: 2px; display: flex; flex-wrap: wrap; align-items: center; row-gap: 2px; }
 .session-meta svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; vertical-align: -2px; margin-right: 4px; stroke-linecap: round; stroke-linejoin: round; }

@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 
 log = logging.getLogger(__name__)
 
 # Enough for Transformers to load each model (skips e.g. Parakeet's .nemo and .gguf copies).
 ALLOW = ["*.json", "*.safetensors", "*.jinja", "*.model", "*.txt"]
+RECHECK_S = 30.0  # how long "not downloaded" is believed before looking at the disk again
 
-_state: dict[str, str] = {}  # repo -> "cached" | "downloading" | "error: ..."
+_state: dict[str, str] = {}  # repo -> "cached" | "downloading" | "missing" | "error: ..."
+_checked: dict[str, float] = {}  # repo -> when "missing" was last confirmed
 _lock = threading.Lock()
 
 
@@ -24,20 +27,32 @@ def is_cached(repo: str) -> bool:
         return False
 
 
-def status(repos: tuple[str, ...]) -> str:
-    """'ready', 'downloading' or 'missing' for a model made of these repos."""
+def _repo_state(repo: str) -> str:
     with _lock:
-        states = [_state.get(r) for r in repos]
+        state = _state.get(repo)
+        if state in ("cached", "downloading") or (state is not None and time.monotonic() - _checked.get(repo, 0) < RECHECK_S):
+            return state
+    cached = is_cached(repo)  # the user may have downloaded it some other way
+    with _lock:
+        if _state.get(repo) == "downloading":
+            return "downloading"
+        if cached:
+            _state[repo] = "cached"
+        elif not str(_state.get(repo, "")).startswith("error"):
+            _state[repo] = "missing"
+        _checked[repo] = time.monotonic()
+        return _state[repo]
+
+
+def status(repos: tuple[str, ...]) -> str:
+    """'ready', 'downloading', 'missing' or 'error: ...' for a model made of these repos."""
+    states = [_repo_state(r) for r in repos]
     if all(s == "cached" for s in states):
         return "ready"
     if any(s == "downloading" for s in states):
         return "downloading"
-    if all(s == "cached" or (s is None and is_cached(r)) for s, r in zip(states, repos)):
-        with _lock:
-            for r in repos:
-                _state[r] = "cached"
-        return "ready"
-    return "missing"
+    errors = [s for s in states if s.startswith("error")]
+    return errors[0] if errors else "missing"
 
 
 def download(repos: tuple[str, ...]) -> None:
@@ -58,7 +73,8 @@ def download(repos: tuple[str, ...]) -> None:
         except Exception as e:  # offline, disk full...
             log.warning("Couldn't download %s: %s", repo, e)
             with _lock:
-                _state[repo] = f"error: {e}"
+                _state[repo] = f"error: {str(e).splitlines()[0][:200]}"
+                _checked[repo] = time.monotonic()
 
 
 def prefetch_in_background(repos: tuple[str, ...]) -> threading.Thread:

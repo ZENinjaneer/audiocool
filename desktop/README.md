@@ -98,6 +98,7 @@ The web UI only opens on the PC itself; other devices get only the token-protect
   2026-09-22_15-05_a1b2c3d4e5f6/      start time (local) + session id, as the phone names backups
     session.json                      the session, with the best transcripts merged in
     recording-1.m4a                   audio exactly as the phone recorded it
+    photo-<id>.jpg                    photos attached to notes (from phone backups)
     notes.md                          notes and transcript, readable without the app
     audiocool-desktop.json            desktop-only data (see below)
 ```
@@ -106,14 +107,21 @@ The web UI only opens on the PC itself; other devices get only the token-protect
 recording, with the model that made them, the audio length and timings), corrections made in
 the web UI, a title changed in the web UI, and cached audio lengths. The phone never writes it,
 so when the phone sends a session again (or overwrites `session.json` in a shared folder), the
-desktop's transcripts survive and are merged back in. `session.json` stays in the phone's format
-(plus a `transcriptModel` field on transcribed recordings, which the phone ignores), so a library
-folder can also go back into the phone's backup folder.
+desktop's transcripts survive and are merged back in. `session.json` stays in the phone's format,
+with each recording's `transcriptModel` saying which model made its transcript (the desktop's id
+for desktop transcripts, whatever the phone sent otherwise), so a library folder can also go back
+into the phone's backup folder.
+
+The app's newer fields are understood: a note's `photo` (a JPEG in the session folder; the web UI
+shows it), `photoText` (text read from the photo; searched, as on the phone) and the session's
+`thumbnail` (shown in the library). Photos aren't part of the phone API (it moves recordings
+only); they arrive with imported backups or when the library is the backup folder itself.
 
 **Import** (web UI): a phone backup folder (or one session folder) by path, e.g.
-`/mnt/c/Users/you/Documents/AudioCool Backup`, or a zip of it by drag and drop. Existing sessions
-are updated when the imported copy is newer; audio the library lacks is copied; desktop
-transcripts are kept. Or set the library folder (Settings) to the backup folder itself.
+`/mnt/c/Users/you/Documents/AudioCool Backup`, or a zip of it by drag and drop. The newer copy of
+each session wins (by `updatedAt`): audio and photos the library lacks are always copied, and ones
+it has at a different size are replaced only when the imported copy is newer. Desktop transcripts
+are kept. Or set the library folder (Settings) to the backup folder itself.
 
 ## Models
 
@@ -249,10 +257,12 @@ that are already queued or running returns that job (its status may then be `run
  "jobs": [{"id": "5f2c9a0e1b7d", "recordingId": "r1", "model": "qwen3-asr-1.7b", "status": "running", "progress": 0.42, "error": null}]}
 ```
 
-`jobs` lists this session's jobs, oldest first (the newest 500 finished jobs are kept overall).
-Status is `queued`, `running`, `done` or `error` (a job cancelled in the web UI ends as `error`
-with `"error": "Cancelled"`). Jobs run one at a time, oldest first, on a background worker; the
-queue is in SQLite, and a job interrupted by a restart runs again.
+`jobs` holds the newest job of each recording that has one (so a failure that a later job fixed
+doesn't linger; the web UI's Jobs page keeps the history). Status is `queued`, `running`, `done`
+or `error` (a job cancelled in the web UI ends as `error` with `"error": "Cancelled"`). Jobs run
+one at a time, oldest first, on a background worker; the queue is in SQLite, and a job interrupted
+by a restart runs again. Each recording's `transcriptModel` in `session` matches `transcriptModels`
+for desktop transcripts and is whatever the phone sent for its own.
 
 Transcript segments are `{"s": <ms>, "e": <ms>, "t": "<text>"}`, from the start of the
 recording's file, 2–20 s long, punctuated and cased.
@@ -262,12 +272,15 @@ recording's file, 2–20 s long, punctuated and cased.
 None in request/response shapes or status codes. Choices the contract left open:
 
 - The pairing code is accepted in any letter case and with spaces or dashes. After 10 failed
-  attempts in a minute from one address, each further 401 is delayed by a second.
+  attempts in a minute from one address, that address's wrong guesses are answered one at a time,
+  a second apart (still 401).
 - An unknown recording id in `recordingIds` is a 400 (bad input), not a 404.
 - `transcribe` answers with the existing job (possibly `running`) for a recording and model that
   are already queued or running, instead of queuing a duplicate.
-- `GET /api/v1/sessions/{id}` returns the title as the desktop has it (a title edited in the web UI
-  wins until the phone renames the session).
+- `GET /api/v1/sessions/{id}`: `jobs` is the newest job per recording rather than the full
+  history; `session` carries the title as the desktop has it (a title edited in the web UI wins
+  until the phone renames the session) and `transcriptModel` on each transcribed recording.
+- Times above the year 9999 are rejected as bad input.
 - "Localhost only" for the web UI means requests from this computer: loopback, or one of the PC's
   own addresses (e.g. opening `http://192.168.x.x:8765/` on the PC itself).
 
@@ -282,11 +295,12 @@ build step, no CDN: it works offline.
 - **Library**: sessions grouped by date with duration, note count and transcription status
   (live progress while transcribing).
 - **Search** (top bar, or press `/`): every word must match, case- and accent-insensitive, in
-  notes, transcripts and titles; hits are highlighted, and clicking one opens the session and
-  plays from that moment.
+  notes, transcripts, titles and text read from photos; hits are highlighted, and clicking one
+  opens the session and plays from that moment.
 - **Session**: player with note markers on the seek bar (hover for the note, click to play from
   just before it), speed control, keyboard (`Space`, `←`/`→`); notes with timestamps (click to
-  play); transcript with timestamps, current line highlighted and followed during playback
+  play), including photos of slides and the text read from them; transcript with timestamps,
+  current line highlighted and followed during playback
   (scrolling by hand pauses following), the model that made it, and inline editing (double-click
   a line or use the pencil; Enter saves, Esc cancels); the title is editable in place;
   "Transcribe" with a model picker and live progress; export as Markdown, plain text or SRT.
@@ -299,6 +313,7 @@ build step, no CDN: it works offline.
 |---|---|
 | ![Library](docs/screenshots/library-light.png) | ![Library, dark](docs/screenshots/library-dark.png) |
 | ![Search](docs/screenshots/search-light.png) | ![Session, dark](docs/screenshots/session-dark.png) |
+| ![Photos of slides](docs/screenshots/session-photos-light.png) | ![Jobs, dark](docs/screenshots/jobs-dark.png) |
 | ![Pair](docs/screenshots/pair-light.png) | ![Jobs](docs/screenshots/jobs-light.png) |
 
 All screenshots (light and dark, plus one at phone width) are in

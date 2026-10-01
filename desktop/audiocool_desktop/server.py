@@ -11,6 +11,7 @@ cross-site page can't add without a CORS preflight that this server never approv
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import logging
@@ -37,7 +38,7 @@ from . import APP_ID, API_VERSION, __version__
 from . import models_cache, netinfo
 from . import sessionfmt as fmt
 from .app import App
-from .library import PHONE_MODEL, Entry, NotFound
+from .library import PHONE_MODEL, PHOTO_NAME, Entry, NotFound
 from .search import search_entries
 from .sessionfmt import AUDIO_NAME, SESSION_ID, BadInput
 
@@ -115,21 +116,36 @@ def api_job(job: dict) -> dict:
 
 
 def api_session(entry: Entry) -> dict:
-    """session.json as the phone knows it, with the desktop's transcripts in place."""
-    s = json.loads(json.dumps(entry.session))
-    for rec in s.get("recordings", []):
-        rec.pop("transcriptModel", None)
-    return s
+    """session.json as the phone knows it, with the desktop's transcripts (and their
+    ``transcriptModel``) in place."""
+    return json.loads(json.dumps(entry.session))
+
+
+def latest_jobs(jobs: list[dict]) -> list[dict]:
+    """The newest job of each recording (jobs are oldest first): what the phone needs to know.
+
+    An old failure that a later job fixed would otherwise look like the current state.
+    """
+    newest: dict[str, dict] = {}
+    for job in jobs:
+        newest[job["recordingId"]] = job
+    return [j for j in jobs if newest[j["recordingId"]] is j]
+
+
+#: Names for the models the app transcribes with on the phone (its SpeechModel.ID).
+PHONE_MODELS = {"parakeet-unified-en-0.6b": "Parakeet 0.6B (phone)"}
 
 
 def recording_info(app: App, entry: Entry, rec: dict) -> dict:
     owned = entry.desktop_transcript(rec["id"])
+    phone_model = rec.get("transcriptModel") if isinstance(rec.get("transcriptModel"), str) else None
     if owned is not None:
-        source = "desktop" if owned["model"] != PHONE_MODEL else "phone-edited"
+        source = "phone-edited" if owned.get("origin") == "phone" or owned["model"] == PHONE_MODEL else "desktop"
+        name = PHONE_MODELS.get(owned["model"], "Phone") if source == "phone-edited" else (owned.get("modelName") or app.registry.name_of(owned["model"]))
     elif rec.get("transcript") is not None:
-        source = "phone"
+        source, name = "phone", PHONE_MODELS.get(phone_model or "", "Phone")
     else:
-        source = None
+        source, name = None, None
     return {
         "id": rec["id"],
         "file": rec["file"],
@@ -137,8 +153,8 @@ def recording_info(app: App, entry: Entry, rec: dict) -> dict:
         "durationMs": entry.audio_duration_ms(rec),
         "hasAudio": entry.audio_file(rec) is not None,
         "transcriptSource": source,
-        "model": owned["model"] if owned else None,
-        "modelName": (owned.get("modelName") or app.registry.name_of(owned["model"])) if owned else ("Phone" if source == "phone" else None),
+        "model": owned["model"] if owned else phone_model,
+        "modelName": name,
         "edited": bool(owned and owned.get("edited")),
         "transcribedAt": owned.get("createdAt") if owned else None,
         "device": owned.get("device") if owned else None,
@@ -150,6 +166,7 @@ def session_summary(app: App, entry: Entry, jobs: list[dict]) -> dict:
     s = entry.session
     recs = [recording_info(app, entry, r) for r in s.get("recordings", [])]
     active = [j for j in jobs if j["status"] in ("queued", "running")]
+    thumb = entry.thumbnail()
     return {
         "id": entry.id,
         "title": s.get("title", ""),
@@ -157,9 +174,11 @@ def session_summary(app: App, entry: Entry, jobs: list[dict]) -> dict:
         "updatedAt": s.get("updatedAt", 0),
         "durationMs": sum(r["durationMs"] for r in recs),
         "noteCount": len(s.get("notes", [])),
+        "photoCount": len(entry.photo_names()),
+        "thumbnail": f"/ui/api/sessions/{quote(entry.id)}/photo/{quote(thumb)}" if thumb else None,
         "recordings": recs,
         "activeJobs": active,
-        "lastError": next((j["error"] for j in reversed(jobs) if j["status"] == "error" and j["error"] != "Cancelled"), None),
+        "lastError": next((j["error"] for j in reversed(latest_jobs(jobs)) if j["status"] == "error" and j["error"] != "Cancelled"), None),
     }
 
 
@@ -187,7 +206,23 @@ def create_app(app: App, port: int = 8765) -> FastAPI:
     api.state.app = app
     lib = app.library
     local_addrs = netinfo.all_local_addresses()
-    failures: dict[str, list[float]] = {}
+    failures: dict[str, list[float]] = {}  # address -> times of recent wrong pairing codes
+    penalty: dict[str, asyncio.Lock] = {}
+
+    async def throttle_failure(ip: str) -> None:
+        """After 10 wrong codes in a minute from one address, answer its wrong guesses one at a
+        time, a second apart, however many it sends in parallel."""
+        now = time.monotonic()
+        if len(failures) > 1000:  # forget addresses that stopped guessing
+            for key in [k for k, v in failures.items() if not v or now - v[-1] > 60]:
+                failures.pop(key, None)
+                penalty.pop(key, None)
+        recent = [t for t in failures.get(ip, []) if now - t < 60]
+        recent.append(now)
+        failures[ip] = recent[-50:]
+        if len(recent) > 10:
+            async with penalty.setdefault(ip, asyncio.Lock()):
+                await asyncio.sleep(1.0)
 
     def is_local(request: Request) -> bool:
         client = request.client.host if request.client else ""
@@ -206,14 +241,7 @@ def create_app(app: App, port: int = 8765) -> FastAPI:
             auth = request.headers.get("authorization", "")
             scheme, _, token = auth.partition(" ")
             if scheme.lower() != "bearer" or not token or not app.config.check_token(token.strip()):
-                ip = request.client.host if request.client else "?"
-                recent = [t for t in failures.get(ip, []) if time.monotonic() - t < 60]
-                recent.append(time.monotonic())
-                failures[ip] = recent[-50:]
-                if len(recent) > 10:  # slow down guessing
-                    import asyncio
-
-                    await asyncio.sleep(1.0)
+                await throttle_failure(request.client.host if request.client else "?")
                 return error(401, "missing or wrong pairing code", {"WWW-Authenticate": "Bearer"})
             return await call_next(request)
         if not is_local(request):
@@ -321,7 +349,7 @@ def create_app(app: App, port: int = 8765) -> FastAPI:
         return {
             "session": api_session(entry),
             "transcriptModels": entry.transcript_models(),
-            "jobs": [api_job(j) for j in app.jobs.for_session(sid)],
+            "jobs": [api_job(j) for j in latest_jobs(app.jobs.for_session(sid))],
         }
 
     @api.put("/api/v1/sessions/{sid}/files/{name}", status_code=204)
@@ -393,6 +421,8 @@ def create_app(app: App, port: int = 8765) -> FastAPI:
             "summary": session_summary(app, entry, jobs),
             "jobs": jobs,
             "folder": str(entry.folder),
+            # Photo notes whose file is here (they come with imported backups).
+            "photos": {name: f"/ui/api/sessions/{quote(entry.id)}/photo/{quote(name)}" for name in entry.photo_names() if entry.photo_file(name)},
         }
 
     @api.get("/ui/api/sessions/{sid}")
@@ -432,6 +462,15 @@ def create_app(app: App, port: int = 8765) -> FastAPI:
         entry = entry_or_404(sid)
         body = await read_json(request, required=False)
         return {"jobs": submit_jobs(entry, body)}
+
+    @api.get("/ui/api/sessions/{sid}/photo/{name}")
+    def ui_photo(sid: str, name: str):
+        entry = entry_or_404(sid)
+        path = entry.photo_file(name)
+        if path is None:
+            raise NotFound("no such photo in this session")
+        media = {".png": "image/png", ".webp": "image/webp"}.get(path.suffix.lower(), "image/jpeg")
+        return FileResponse(path, media_type=media, headers={"Cache-Control": "max-age=3600"})
 
     @api.get("/ui/api/sessions/{sid}/audio/{rid}")
     def ui_audio(sid: str, rid: str):
@@ -549,11 +588,14 @@ def create_app(app: App, port: int = 8765) -> FastAPI:
             if not isinstance(body["library"], str) or not body["library"].strip():
                 raise BadInput("the library folder can't be empty")
             target = Path(os.path.expanduser(body["library"].strip()))
-            try:
-                target.mkdir(parents=True, exist_ok=True)
-            except OSError as e:
-                raise BadInput(f"can't use {target}: {e}") from e
-            await run_in_threadpool(app.set_library, target)
+            if target.resolve() != lib.root.resolve() or app.config.library_overridden:
+                try:
+                    target.mkdir(parents=True, exist_ok=True)
+                except OSError as e:
+                    raise BadInput(f"can't use {target}: {e}") from e
+                await run_in_threadpool(app.set_library, target)
+            else:
+                await run_in_threadpool(lib.refresh, True)  # same folder: just look at it again
         return ui_settings()
 
     @api.api_route("/ui/{rest:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
@@ -587,7 +629,7 @@ def _import_zip(lib, archive: Path, dest: Path) -> dict:
             if not parts or any(p == ".." or p.startswith(".") for p in parts) or len(parts) > 6:
                 continue
             name = parts[-1]
-            if name not in allowed and not AUDIO_NAME.fullmatch(name):
+            if name not in allowed and not AUDIO_NAME.fullmatch(name) and not PHOTO_NAME.fullmatch(name):
                 continue
             target = dest.joinpath(*parts)
             target.parent.mkdir(parents=True, exist_ok=True)

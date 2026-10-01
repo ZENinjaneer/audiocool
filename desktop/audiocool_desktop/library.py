@@ -5,6 +5,7 @@ Same layout as the phone's backup folder, so a backup can be imported or used di
     <library>/2026-09-22_15-05_a1b2c3d4e5f6/
         session.json            the session (phone format), with the best transcripts merged in
         recording-1.m4a         audio, exactly as uploaded
+        photo-<id>.jpg          photos attached to notes (they arrive with backups, not the API)
         notes.md                human-readable notes and transcript
         audiocool-desktop.json  desktop-only data (see below)
 
@@ -20,6 +21,7 @@ import copy
 import json
 import logging
 import os
+import re
 import secrets
 import shutil
 import threading
@@ -38,6 +40,8 @@ SESSION_JSON = "session.json"
 NOTES_MD = "notes.md"
 SIDECAR = "audiocool-desktop.json"
 PHONE_MODEL = "phone"
+#: Photos the phone attaches to notes (BackupManager.PHOTO in the app is photo-[\w-]+\.jpg).
+PHOTO_NAME = re.compile(r"photo-[\w-]+\.(jpg|jpeg|png|webp)", re.IGNORECASE)
 # A replacement audio file whose length differs by more than this is a different recording
 # (e.g. the first upload was cut short), so a transcript of the old file no longer applies.
 STALE_TRANSCRIPT_MS = 2000
@@ -49,6 +53,32 @@ class NotFound(LookupError):
 
 def new_sidecar() -> dict:
     return {"version": 1, "transcripts": {}, "audio": {}}
+
+
+def clean_sidecar(raw: Any) -> dict:
+    """A sidecar read from disk, keeping only well-formed parts (it may be hand-edited or old)."""
+    out = new_sidecar()
+    if not isinstance(raw, dict):
+        return out
+    for key, value in raw.items():
+        if key not in ("transcripts", "audio", "title"):
+            out[key] = value
+    transcripts = raw.get("transcripts")
+    if isinstance(transcripts, dict):
+        for rid, t in transcripts.items():
+            if not (isinstance(t, dict) and isinstance(t.get("model"), str)):
+                continue
+            try:
+                segments = fmt.validate_transcript(t.get("segments"), "segments")
+            except BadInput:
+                continue
+            out["transcripts"][str(rid)] = {**t, "segments": segments}
+    if isinstance(raw.get("audio"), dict):
+        out["audio"] = {k: v for k, v in raw["audio"].items() if isinstance(v, dict)}
+    title = raw.get("title")
+    if isinstance(title, dict) and isinstance(title.get("value"), str):
+        out["title"] = title
+    return out
 
 
 def _read_json(path: Path) -> Any:
@@ -68,6 +98,16 @@ def _stat_key(folder: Path) -> tuple:
     except FileNotFoundError:
         sc_key = (0, 0)
     return (st.st_mtime_ns, st.st_size) + sc_key
+
+
+def _copy_into(src: Path, folder: Path, name: str) -> None:
+    """Copies a file into a session folder atomically."""
+    tmp = folder / f".{name}.{secrets.token_hex(6)}.part"
+    try:
+        shutil.copyfile(src, tmp)
+        os.replace(tmp, folder / name)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 @dataclass
@@ -118,16 +158,43 @@ class Entry:
         cached = self.sidecar.get("audio", {}).get(rec["file"]) or {}
         return int(cached.get("durationMs") or 0)
 
+    def photo_names(self) -> list[str]:
+        """Photo files the session's notes refer to (safe names only)."""
+        names = []
+        for note in self.session.get("notes", []):
+            name = note.get("photo")
+            if isinstance(name, str) and PHOTO_NAME.fullmatch(name) and name not in names:
+                names.append(name)
+        return names
+
+    def photo_file(self, name: str) -> Path | None:
+        if name not in self.photo_names():
+            return None
+        path = self.folder / name
+        return path if path.is_file() else None
+
+    def thumbnail(self) -> str | None:
+        """The photo that stands for the session in lists, chosen as the app does: the note named
+        by ``thumbnail``, else the first photo in timeline order (if its file is here)."""
+        notes = [n for n in fmt.ordered_notes(self.session) if isinstance(n.get("photo"), str)]
+        chosen = next((n for n in notes if n.get("id") == self.session.get("thumbnail")), None) or (notes[0] if notes else None)
+        if chosen is None:
+            return None
+        return chosen["photo"] if self.photo_file(chosen["photo"]) else None
+
 
 def merge(base: dict, sidecar: dict) -> dict:
-    """The session as the desktop presents it: desktop transcripts and title edits win."""
+    """The session as the desktop presents it: desktop transcripts and title edits win.
+
+    ``transcriptModel`` (which the app also writes, for its own transcripts) is set to the model
+    of the desktop's transcript where there is one, and left as the phone sent it elsewhere.
+    """
     s = copy.deepcopy(base)
     title = sidecar.get("title")
     if isinstance(title, dict) and isinstance(title.get("value"), str):
         s["title"] = title["value"]
     transcripts = sidecar.get("transcripts", {})
     for rec in s.get("recordings", []):
-        rec.pop("transcriptModel", None)
         d = transcripts.get(rec["id"])
         if d is not None:
             rec["transcript"] = copy.deepcopy(d["segments"])
@@ -204,25 +271,25 @@ class Library:
             self._by_folder = by_folder
 
     def _load(self, folder: Path) -> Entry | None:
+        """Reads one session folder; a damaged one is skipped (and logged), never fatal."""
         try:
-            raw = _read_json(folder / SESSION_JSON)
-            base = fmt.validate_session(raw)
+            base = fmt.validate_session(_read_json(folder / SESSION_JSON))
         except (OSError, ValueError) as e:
             log.warning("Skipping %s: unreadable session.json (%s)", folder, e)
             return None
         sidecar = new_sidecar()
+        if (folder / SIDECAR).exists():
+            try:
+                sidecar = clean_sidecar(_read_json(folder / SIDECAR))
+            except (OSError, ValueError) as e:
+                log.warning("Ignoring unreadable %s in %s (%s)", SIDECAR, folder.name, e)
         try:
-            if (folder / SIDECAR).exists():
-                loaded = _read_json(folder / SIDECAR)
-                if isinstance(loaded, dict):
-                    sidecar.update(loaded)
-                    sidecar.setdefault("transcripts", {})
-                    sidecar.setdefault("audio", {})
-        except (OSError, ValueError) as e:
-            log.warning("Ignoring unreadable %s in %s (%s)", SIDECAR, folder.name, e)
-        if _apply_title_rule(base.get("title", ""), sidecar):
-            self._write_sidecar(folder, sidecar)
-        return Entry(id=base["id"], folder=folder, session=merge(base, sidecar), sidecar=sidecar, key=_stat_key(folder))
+            if _apply_title_rule(base.get("title", ""), sidecar):
+                self._write_sidecar(folder, sidecar)
+            return Entry(id=base["id"], folder=folder, session=merge(base, sidecar), sidecar=sidecar, key=_stat_key(folder))
+        except Exception as e:  # noqa: BLE001 - one bad folder mustn't take the library down
+            log.warning("Skipping %s: %s", folder, e)
+            return None
 
     def entries(self) -> list[Entry]:
         self.refresh()
@@ -265,12 +332,13 @@ class Library:
     def _write(self, folder: Path, base: dict, sidecar: dict, sidecar_changed: bool = True) -> Entry:
         """Saves a session (phone data + sidecar) and regenerates notes.md."""
         effective = merge(base, sidecar)
+        entry = Entry(id=base["id"], folder=folder, session=effective, sidecar=sidecar)
+        # Render first, so a problem shows up before anything is half-written.
+        md = fmt.session_markdown(effective, include_transcript=True, model_names=entry.model_names())
         folder.mkdir(parents=True, exist_ok=True)
         if sidecar_changed or not (folder / SIDECAR).exists():
             self._write_sidecar(folder, sidecar)
         atomic_write_text(folder / SESSION_JSON, json.dumps(effective, indent=2, ensure_ascii=False) + "\n")
-        entry = Entry(id=base["id"], folder=folder, session=effective, sidecar=sidecar)
-        md = fmt.session_markdown(effective, include_transcript=True, model_names=entry.model_names())
         md_path = folder / NOTES_MD
         try:
             unchanged = md_path.read_text(encoding="utf-8") == md
@@ -328,9 +396,16 @@ class Library:
                 log.info("Removing %s/%s (replaced)", folder.name, path.name)
                 path.unlink(missing_ok=True)
 
-    def upload_temp_path(self, session_id: str, name: str) -> Path:
-        entry = self.require(session_id)
-        return entry.folder / f".{name}.{secrets.token_hex(6)}.part"
+    def _note_new_audio(self, sidecar: dict, folder: Path, rec: dict, duration: int) -> None:
+        """Records a new audio file's length and drops a desktop transcript made of different audio."""
+        name = rec["file"]
+        st = (folder / name).stat()
+        sidecar.setdefault("audio", {})[name] = {"size": st.st_size, "durationMs": duration}
+        old = sidecar.get("transcripts", {}).get(rec["id"])
+        if old and duration and old.get("audioDurationMs") and abs(duration - old["audioDurationMs"]) > STALE_TRANSCRIPT_MS:
+            log.info("New audio for %s/%s is %d ms (transcript was of %d ms); dropping the old transcript",
+                     folder.name, rec["id"], duration, old["audioDurationMs"])
+            sidecar["transcripts"].pop(rec["id"], None)
 
     def commit_audio(self, session_id: str, name: str, tmp: Path) -> None:
         """Moves a fully received upload into place (atomically) and tidies up after it."""
@@ -343,13 +418,7 @@ class Library:
                 raise NotFound(f"{name} is not part of session {session_id}")
             os.replace(tmp, entry.folder / name)
             sidecar = copy.deepcopy(entry.sidecar)
-            st = (entry.folder / name).stat()
-            sidecar.setdefault("audio", {})[name] = {"size": st.st_size, "durationMs": duration}
-            old = sidecar.get("transcripts", {}).get(rec["id"])
-            if old and duration and old.get("audioDurationMs") and abs(duration - old["audioDurationMs"]) > STALE_TRANSCRIPT_MS:
-                log.info("New audio for %s/%s is %d ms (transcript was of %d ms); dropping the old transcript",
-                         session_id, rec["id"], duration, old["audioDurationMs"])
-                sidecar["transcripts"].pop(rec["id"], None)
+            self._note_new_audio(sidecar, entry.folder, rec, duration)
             base = self._base(entry)
             self._write(entry.folder, base, sidecar)
             self._remove_replaced_audio(entry.folder, base)
@@ -373,9 +442,9 @@ class Library:
         base = copy.deepcopy(entry.session)
         owned = entry.sidecar.get("transcripts", {})
         for rec in base.get("recordings", []):
-            rec.pop("transcriptModel", None)
             if rec["id"] in owned:
                 rec.pop("transcript", None)
+                rec.pop("transcriptModel", None)
         return base
 
     def set_transcript(self, session_id: str, rec_id: str, segments: list[dict], model: str, model_name: str, **meta: Any) -> None:
@@ -388,6 +457,7 @@ class Library:
             sidecar.setdefault("transcripts", {})[rec_id] = {
                 "model": model,
                 "modelName": model_name,
+                "origin": "desktop",
                 "createdAt": fmt.now_ms(),
                 "edited": False,
                 **meta,
@@ -397,7 +467,8 @@ class Library:
 
     def edit_transcript_line(self, session_id: str, rec_id: str, index: int, text: str, start_ms: int | None = None) -> dict:
         """Corrects one transcript line from the web UI. Editing the phone's transcript makes it a
-        desktop-owned copy (model "phone"), so the correction survives the next sync."""
+        desktop-owned copy (still labelled with the phone's model), so the correction survives the
+        next sync and goes back to the phone."""
         with self._lock:
             entry = self.require(session_id)
             rec = entry.recording(rec_id)
@@ -408,8 +479,9 @@ class Library:
             if record is None:
                 if not rec.get("transcript"):
                     raise NotFound("this recording has no transcript")
-                record = {"model": PHONE_MODEL, "modelName": "Phone", "createdAt": fmt.now_ms(),
-                          "segments": copy.deepcopy(rec["transcript"])}
+                phone_model = rec.get("transcriptModel") if isinstance(rec.get("transcriptModel"), str) else None
+                record = {"model": phone_model or PHONE_MODEL, "modelName": "Phone", "origin": "phone",
+                          "createdAt": fmt.now_ms(), "segments": copy.deepcopy(rec["transcript"])}
                 sidecar["transcripts"][rec_id] = record
             segs = record["segments"]
             if not 0 <= index < len(segs):
@@ -447,8 +519,10 @@ class Library:
     def import_folder(self, src: Path) -> str:
         """Imports one session folder in the backup layout. Returns 'added', 'updated' or 'unchanged'.
 
-        The newer copy of the session data wins (by updatedAt); audio the library lacks (or has
-        at a different size) is copied; transcripts made on the desktop are kept.
+        The newer copy of the session (by updatedAt) wins, files included: audio and photos the
+        library lacks are always copied, and ones it has at a different size are replaced only
+        when the imported copy is the newer one. Transcripts made on the desktop are kept (unless
+        the audio they were made from is replaced by a recording of a different length).
         """
         src = Path(src)
         try:
@@ -465,9 +539,7 @@ class Library:
                 sidecar = new_sidecar()
                 if (src / SIDECAR).is_file():
                     try:
-                        loaded = _read_json(src / SIDECAR)
-                        if isinstance(loaded, dict):
-                            sidecar.update(loaded)
+                        sidecar = clean_sidecar(_read_json(src / SIDECAR))
                     except (OSError, ValueError):
                         pass
                 _apply_title_rule(session.get("title", ""), sidecar)
@@ -481,19 +553,25 @@ class Library:
                     status = "updated"
                 else:
                     base = self._base(entry)
+            newer = status != "unchanged"
             folder.mkdir(parents=True, exist_ok=True)
             copied = False
             for rec in base.get("recordings", []):
                 s_path, d_path = src / rec["file"], folder / rec["file"]
-                if s_path.is_file() and (not d_path.is_file() or d_path.stat().st_size != s_path.stat().st_size):
-                    tmp = folder / f".{rec['file']}.{secrets.token_hex(6)}.part"
-                    try:
-                        shutil.copyfile(s_path, tmp)
-                        os.replace(tmp, d_path)
-                    finally:
-                        tmp.unlink(missing_ok=True)
+                if not s_path.is_file():
+                    continue
+                if d_path.is_file() and (not newer or d_path.stat().st_size == s_path.stat().st_size):
+                    continue
+                _copy_into(s_path, folder, rec["file"])
+                self._note_new_audio(sidecar, folder, rec, self._probe_safely(d_path))
+                copied = True
+            photos = Entry(id=base["id"], folder=folder, session=base, sidecar=sidecar).photo_names()
+            for name in photos:
+                s_path, d_path = src / name, folder / name
+                if s_path.is_file() and (not d_path.is_file() or (newer and d_path.stat().st_size != s_path.stat().st_size)):
+                    _copy_into(s_path, folder, name)
                     copied = True
-            if status != "unchanged" or copied:
+            if newer or copied:
                 self._write(folder, base, sidecar)
                 self._remove_replaced_audio(folder, base)
                 if status == "unchanged":
@@ -511,7 +589,8 @@ class Library:
                 status = self.import_folder(folder)
                 result[status] += 1
                 result["sessions"].append({"folder": folder.name, "status": status})
-            except (BadInput, OSError) as e:
+            except Exception as e:  # noqa: BLE001 - report it and go on with the other sessions
+                log.warning("Couldn't import %s: %s", folder, e)
                 result["errors"].append(f"{folder.name}: {e}")
         if not result["sessions"] and not result["errors"]:
             raise BadInput("no sessions found (looking for folders that contain session.json)")

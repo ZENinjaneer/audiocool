@@ -45,6 +45,7 @@
     refresh: '<svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66L20 8.5"/><path d="M20 3.5v5h-5"/></svg>',
     chip: '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9.5 2.5v3.5M14.5 2.5v3.5M9.5 18v3.5M14.5 18v3.5M2.5 9.5H6M2.5 14.5H6M18 9.5h3.5M18 14.5h3.5"/></svg>',
     heading: '<svg viewBox="0 0 24 24"><path d="M6 4.5v15M18 4.5v15M6 12h12"/></svg>',
+    image: '<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="m4 17 5-4.5 3.5 3 3-2.5 4.5 4"/></svg>',
     zip: '<svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M10 7h2M10 10h2M10 13h2M10 16h2v2h-2z"/></svg>',
   };
   const icon = (name) => raw(ICONS[name] || '');
@@ -109,15 +110,20 @@
     setTimeout(() => el.remove(), kind === 'err' ? 5600 : 3000);
   }
 
-  /** Repeats fn every ms (slower while the tab is hidden); returns a stop function. */
+  /** Repeats fn every ms (a number or a function returning one; at most every 10 s while the tab
+   * is hidden); returns a stop function. */
   function poll(fn, ms) {
     let timer = null, stopped = false;
+    const interval = () => {
+      const base = Number(typeof ms === 'function' ? ms() : ms) || 4000;
+      return document.hidden ? Math.max(base, 10000) : base;
+    };
     const tick = async () => {
       if (stopped) return;
       try { await fn(); } catch (e) { /* keep polling */ }
-      if (!stopped) timer = setTimeout(tick, document.hidden ? Math.max(ms, 10000) : (typeof ms === 'function' ? ms() : ms));
+      if (!stopped) timer = setTimeout(tick, interval());
     };
-    timer = setTimeout(tick, typeof ms === 'function' ? ms() : ms);
+    timer = setTimeout(tick, interval());
     return () => { stopped = true; clearTimeout(timer); };
   }
 
@@ -264,7 +270,9 @@
     const d = new Date(s.createdAt);
     const recs = s.recordings.length;
     return html`<a class="card session-card" href="#/session/${encodeURIComponent(s.id)}">
-      <div class="session-date"><span class="m">${d.toLocaleDateString(undefined, { month: 'short' })}</span><span class="d">${d.getDate()}</span></div>
+      ${s.thumbnail
+        ? html`<img class="session-thumb" src="${s.thumbnail}" alt="" loading="lazy">`
+        : html`<div class="session-date"><span class="m">${d.toLocaleDateString(undefined, { month: 'short' })}</span><span class="d">${d.getDate()}</span></div>`}
       <div style="min-width:0">
         <div class="session-title">${s.title || 'Untitled'}</div>
         <div class="session-meta">
@@ -355,7 +363,7 @@
             <div class="hit-group-head"><a href="#/session/${encodeURIComponent(sid)}">${hits[0].sessionTitle || 'Untitled'}</a>
               <span class="muted small">${fmtDateTime(hits[0].sessionCreatedAt)}</span><span class="muted small">· ${plural(hits.length, 'match')}</span></div>
             ${hits.map((h) => html`<a class="hit" href="${hitLink(h)}">
-              <span class="kind ${h.kind}" title="${{ note: 'Note', speech: 'Transcript', title: 'Title' }[h.kind]}">${icon({ note: 'note', speech: 'speech', title: 'heading' }[h.kind])}</span>
+              <span class="kind ${h.kind}" title="${{ note: 'Note', speech: 'Transcript', title: 'Title', photo: 'On a photo' }[h.kind]}">${icon({ note: 'note', speech: 'speech', title: 'heading', photo: 'image' }[h.kind])}</span>
               <span class="chip">${h.kind === 'title' ? 'title' : h.label || '—'}</span>
               <span>${highlight(h.text, h.matches)}</span></a>`)}
           </div>`;
@@ -643,6 +651,13 @@
     }
 
     // -- notes -------------------------------------------------------------------------
+    /** A note's photo (a slide, say), if its file came with the session (via an imported backup). */
+    function photoBlock(n) {
+      const url = data.photos && data.photos[n.photo];
+      if (!url) return html`<div class="photo-missing">${icon('image')}<span>Photo not on this computer (${n.photo})</span></div>`;
+      return html`<a class="note-photo" href="${url}" target="_blank" rel="noopener" title="Open the photo"><img src="${url}" alt="${n.text || 'Photo'}" loading="lazy"></a>`;
+    }
+
     function renderNotes() {
       const box = $('#notes', el);
       const sess = s();
@@ -656,11 +671,14 @@
       box.innerHTML = out(ordered.map((n) => {
         const linked = n.offsetMs != null && recNum(n.recId) > 0;
         const label = linked ? (sess.recordings.length > 1 ? `#${recNum(n.recId)} ${fmtTime(n.offsetMs)}` : fmtTime(n.offsetMs)) : '—';
-        return html`<div class="note-item ${linked ? 'linked' : ''}" data-note="${n.id}" ${linked ? '' : 'title="Not linked to the audio"'}>
+        return html`<div class="note-item ${linked ? 'linked' : ''} ${n.photo ? 'has-photo' : ''}" data-note="${n.id}" ${linked ? '' : 'title="Not linked to the audio"'}>
           <span class="chip">${label}</span>
-          <div><div class="note-text">${n.text}</div>${linked ? '' : html`<div class="when">written ${fmtDateTime(n.createdAt)}</div>`}</div></div>`;
+          <div>${n.photo ? photoBlock(n) : ''}${n.text ? html`<div class="note-text">${n.text}</div>` : ''}
+            ${n.photoText ? html`<details class="photo-text"><summary>Text in the photo</summary><div>${n.photoText}</div></details>` : ''}
+            ${linked ? '' : html`<div class="when">written ${fmtDateTime(n.createdAt)}</div>`}</div></div>`;
       }));
-      $$('.note-item.linked', box).forEach((item) => item.addEventListener('click', () => {
+      $$('.note-item.linked', box).forEach((item) => item.addEventListener('click', (e) => {
+        if (e.target.closest('a, details')) return; // opening a photo or its text isn't "play"
         const n = sess.notes.find((x) => x.id === item.dataset.note);
         const i = sess.recordings.findIndex((x) => x.id === n.recId);
         if (i !== recIdx) { recIdx = i; render(); }
@@ -826,10 +844,19 @@
       const sessionSig = JSON.stringify([fresh.session, fresh.summary.recordings]);
       const changed = sessionSig !== lastSig;
       const finished = fresh.jobs.filter((j) => wasActive.has(j.id) && j.status === 'done');
+      const busy = editing || (document.activeElement && document.activeElement.id === 'title');
+      if (changed && busy) {
+        // Keep what's on screen (and what an edit refers to) until the edit is done; the next
+        // refresh after it brings the new content.
+        data.jobs = fresh.jobs;
+        renderBanner();
+        return;
+      }
       data = fresh;
-      if (changed && lastSig && !editing) {
-        const keepTitle = document.activeElement && document.activeElement.id === 'title';
-        if (!keepTitle) { const y = $('#transcript', el)?.scrollTop; render(); if (y) $('#transcript', el).scrollTop = y; }
+      if (changed) {
+        const y = $('#transcript', el)?.scrollTop;
+        render();
+        if (y) $('#transcript', el).scrollTop = y;
       } else {
         renderBanner();
       }
@@ -1100,10 +1127,17 @@ New-NetFirewallHyperVRule -Name "AudioCool-Desktop" -DisplayName "AudioCool Desk
           </div>`)}
         </section>
       </form>`);
+    let saved = { name: s.name, defaultModel: s.defaultModel, library: s.library };
     $('#form', el).addEventListener('submit', async (e) => {
       e.preventDefault();
+      // Send only what changed: saving the library folder also rescans it (and makes a
+      // --library folder given for this run the saved one).
+      const now = { name: $('#name', el).value.trim(), defaultModel: $('#model', el).value, library: $('#library', el).value.trim() };
+      const changes = Object.fromEntries(Object.entries(now).filter(([k, v]) => v !== saved[k]));
+      if (!Object.keys(changes).length) { toast('Nothing changed'); return; }
       try {
-        await api('/settings', { method: 'PUT', json: { name: $('#name', el).value, defaultModel: $('#model', el).value, library: $('#library', el).value } });
+        const res = await api('/settings', { method: 'PUT', json: changes });
+        saved = { name: res.name, defaultModel: res.defaultModel, library: res.library };
         await loadInfo();
         $('#saved', el).textContent = 'Saved';
         toast('Settings saved');

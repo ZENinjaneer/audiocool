@@ -54,6 +54,17 @@ def find_terms(folded: str, terms: list[str]) -> list[tuple[int, int]] | None:
     return merged
 
 
+def photo_snippet(text: str, terms: list[str]) -> tuple[str, list[tuple[int, int]]]:
+    """The lines of a photo's text that matched (up to 3, joined with " · "), as the app shows them."""
+    lines = [line for line in text.splitlines() if any(t in fold(line) for t in terms)][:3]
+    snippet = " · ".join(lines)
+    matches = find_terms(fold(snippet), terms)
+    if matches is not None:
+        return snippet, matches
+    joined = text.replace("\n", " · ")
+    return joined, find_terms(fold(joined), terms) or []
+
+
 def _index(entry) -> list[tuple]:
     """(kind, folded text, text, recId, atMs, noteId, timeline key) for every searchable line, cached per entry."""
     if entry._search is not None:
@@ -65,8 +76,12 @@ def _index(entry) -> list[tuple]:
         text = note.get("text", "")
         rec = fmt.recording(s, note.get("recId"))
         linked = rec is not None and note.get("offsetMs") is not None
-        items.append(("note", fold(text), text, rec["id"] if rec else None, note.get("offsetMs") if linked else None,
-                      note.get("id"), fmt.timeline_key(s, note)))
+        at = note.get("offsetMs") if linked else None
+        items.append(("note", fold(text), text, rec["id"] if rec else None, at, note.get("id"), fmt.timeline_key(s, note)))
+        photo_text = note.get("photoText")
+        if isinstance(photo_text, str) and photo_text.strip():
+            # Text read from a photo of a slide (the app's "On a photo" hits).
+            items.append(("photo", fold(photo_text), photo_text, rec["id"] if rec else None, at, note.get("id"), fmt.timeline_key(s, note)))
     for rec in s.get("recordings", []):
         for i, seg in enumerate(rec.get("transcript") or []):
             text = seg.get("t", "")
@@ -94,13 +109,16 @@ def search_entries(entries: Iterable, query: str, limit: int = 500) -> dict:
             if len(hits) >= limit:
                 continue
             kind, _, text, rec_id, at_ms, note_id, _key = it[:7]
+            matches = it[-1]
+            if kind == "photo":
+                text, matches = photo_snippet(text, terms)
             hit = {
                 "sessionId": entry.id,
                 "sessionTitle": entry.session.get("title", ""),
                 "sessionCreatedAt": entry.session.get("createdAt", 0),
                 "kind": kind,
                 "text": text,
-                "matches": [list(m) for m in it[-1]],
+                "matches": [list(m) for m in matches],
                 "recId": rec_id,
                 "atMs": at_ms,
                 "noteId": note_id,

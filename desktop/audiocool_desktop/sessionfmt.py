@@ -26,7 +26,11 @@ class BadInput(ValueError):
 # Validation
 
 
-def _int(value: Any, what: str, default: int | None = None, minimum: int | None = 0) -> int:
+#: Largest time accepted (ms): the end of year 9999, which dates can still be formatted.
+MAX_MS = 253_402_300_799_999
+
+
+def _int(value: Any, what: str, default: int | None = None, minimum: int | None = 0, maximum: int | None = MAX_MS) -> int:
     if value is None:
         if default is None:
             raise BadInput(f"{what} is required")
@@ -40,6 +44,8 @@ def _int(value: Any, what: str, default: int | None = None, minimum: int | None 
         value = int(value)
     if minimum is not None and value < minimum:
         raise BadInput(f"{what} must be >= {minimum}")
+    if maximum is not None and value > maximum:
+        raise BadInput(f"{what} is too large")
     return value
 
 
@@ -213,7 +219,10 @@ def format_time(ms: int) -> str:
 
 def format_date(ms: int) -> str:
     """'Sep 22, 2026 · 3:05 PM' in local time (like the app's formatDate)."""
-    dt = datetime.fromtimestamp(int(ms) / 1000)
+    try:
+        dt = datetime.fromtimestamp(int(ms) / 1000)
+    except (OverflowError, OSError, ValueError):
+        return "(unknown date)"
     hour = dt.hour % 12 or 12
     return f"{dt.strftime('%b')} {dt.day}, {dt.year} · {hour}:{dt.minute:02d} {'AM' if dt.hour < 12 else 'PM'}"
 
@@ -277,7 +286,11 @@ def session_markdown(session: dict, include_transcript: bool = True, model_names
     out += [header, ""]
     for note in ordered_notes(session):
         label = note_label(session, note)
-        out.append(f"- [{label}] {note.get('text', '')}" if label else f"- {note.get('text', '')}")
+        text = note.get("text", "")
+        if isinstance(note.get("photo"), str) and note["photo"]:
+            # A photo shows as an image (its file is in the same folder), as in the app's notes.md.
+            text = f"![{text if text.strip() else 'Photo'}]({note['photo']})"
+        out.append(f"- [{label}] {text}" if label else f"- {text}")
     if recs:
         out.append("")
         out.append("Audio: " + ", ".join(f"{r['file']} ({format_time(r.get('durationMs', 0))})" for r in recs))
@@ -303,7 +316,10 @@ def session_text(session: dict, model_names: dict[str, str] | None = None) -> st
         out += ["", "NOTES", ""]
         for note in notes:
             label = note_label(session, note)
-            out.append(f"[{label}] {note.get('text', '')}" if label else f"{note.get('text', '')}")
+            text = note.get("text", "")
+            if isinstance(note.get("photo"), str) and note["photo"]:
+                text = f"[photo {note['photo']}] {text}".rstrip()
+            out.append(f"[{label}] {text}" if label else text)
     if any(r.get("transcript") for r in recs):
         out += ["", "TRANSCRIPT", ""]
         names = _model_names_used(session, model_names)

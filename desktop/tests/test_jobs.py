@@ -83,7 +83,24 @@ def test_duplicate_requests_share_a_job(env):
     assert c["id"] != a["id"]
     env.engines[0].gate.set()
     env.wait_jobs()
-    assert [j["status"] for j in session_body(env)["jobs"]] == ["done", "done"]
+    assert [j["status"] for j in env.app.jobs.for_session("a1b2c3d4e5f6")] == ["done", "done"]
+    # The phone sees the newest job of each recording.
+    assert [(j["id"], j["status"]) for j in session_body(env)["jobs"]] == [(c["id"], "done")]
+
+
+def test_phone_sees_the_latest_job_of_each_recording(env):
+    """An old failure that a later job fixed mustn't look like the current state to the phone."""
+    env.sync_with_audio()
+    env.engines[0].fail = "first try failed"
+    transcribe(env)
+    env.wait_jobs()
+    assert [j["status"] for j in session_body(env)["jobs"]] == ["error"]
+    env.engines[0].fail = None
+    retry = transcribe(env)[0]
+    env.wait_jobs()
+    body = session_body(env)
+    assert [(j["id"], j["status"], j["error"]) for j in body["jobs"]] == [(retry["id"], "done", None)]
+    assert len(env.app.jobs.for_session("a1b2c3d4e5f6")) == 2  # the web UI keeps the history
 
 
 def test_jobs_run_one_at_a_time_in_order(env):
@@ -122,14 +139,14 @@ def test_queue_survives_restart(tmp_path):
         jobs = transcribe(env) + transcribe(env, {"model": "fake-fast"})
         # Pretend the server died in the middle of the first job.
         env.app.jobs._db.execute("UPDATE jobs SET status='running', progress=0.5 WHERE id=?", (jobs[0]["id"],))
-        assert [j["status"] for j in session_body(env)["jobs"]] == ["running", "queued"]
+        assert [j["status"] for j in env.app.jobs.for_session("a1b2c3d4e5f6")] == ["running", "queued"]
         env.close()
         env.start_worker = True
         env.open()
         env.wait_jobs()
-        body = session_body(env)
-        assert [(j["id"], j["status"]) for j in body["jobs"]] == [(jobs[0]["id"], "done"), (jobs[1]["id"], "done")]
-        assert body["transcriptModels"] == {"r1": "fake-fast"}  # the later job's transcript is the current one
+        history = env.app.jobs.for_session("a1b2c3d4e5f6")
+        assert [(j["id"], j["status"]) for j in history] == [(jobs[0]["id"], "done"), (jobs[1]["id"], "done")]
+        assert session_body(env)["transcriptModels"] == {"r1": "fake-fast"}  # the later job's transcript is the current one
     finally:
         env.close()
 
@@ -146,7 +163,7 @@ def test_cancel_queued_and_running(env):
     assert env.ui("DELETE", f"/jobs/{running['id']}").status_code == 200
     best.gate.set()
     env.wait_jobs()
-    statuses = {j["id"]: (j["status"], j["error"]) for j in session_body(env)["jobs"]}
+    statuses = {j["id"]: (j["status"], j["error"]) for j in env.app.jobs.for_session("a1b2c3d4e5f6")}
     assert statuses == {running["id"]: ("error", "Cancelled"), queued["id"]: ("error", "Cancelled")}
     assert env.ui("DELETE", f"/jobs/{running['id']}").status_code == 404
     jobs_page = env.ui("GET", "/jobs").json()["jobs"]

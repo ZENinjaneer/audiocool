@@ -37,6 +37,7 @@ def main() -> int:
     p.add_argument("--at", type=int, default=98_000, help="playback position (ms) for the session page")
     p.add_argument("--query", default="princess")
     p.add_argument("--busy", nargs="*", default=[], help="session:model transcriptions to start before the library/jobs shots")
+    p.add_argument("--photos", help="a session with photo notes to show (session-photos-<scheme>.png)")
     p.add_argument("--out", default=str(OUT))
     args = p.parse_args()
     out = Path(args.out)
@@ -44,6 +45,7 @@ def main() -> int:
 
     quiet = [
         ("session", f"#/session/{args.session}?t={args.at}", ".line.active"),
+        *([("session-photos", f"#/session/{args.photos}?t=101000", ".note-photo img")] if args.photos else []),
         ("search", f"#/search?q={args.query}", ".hit"),
         ("pair", "#/pair", ".qr-box svg"),
         ("import", "#/import", ".drop"),
@@ -65,7 +67,7 @@ def main() -> int:
             page = pages[scheme]
             page.goto(f"{args.url}/{route}")
             page.wait_for_selector(wait_for, timeout=20_000)
-            if name == "session":
+            if name.startswith("session"):
                 page.wait_for_timeout(1200)
                 page.evaluate("document.getElementById('audio').pause()")
                 page.wait_for_timeout(600)
