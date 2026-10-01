@@ -122,14 +122,20 @@ def api_session(entry: Entry) -> dict:
 
 
 def latest_jobs(jobs: list[dict]) -> list[dict]:
-    """The newest job of each recording (jobs are oldest first): what the phone needs to know.
+    """What the phone needs to know about each recording (jobs are oldest first): its queued or
+    running jobs if it has any, otherwise its newest job.
 
-    An old failure that a later job fixed would otherwise look like the current state.
+    An old failure that a later job fixed would otherwise look like the current state, and a
+    cancelled newer job mustn't hide an older one that is still running.
     """
+    active = {j["recordingId"] for j in jobs if j["status"] in ("queued", "running")}
     newest: dict[str, dict] = {}
     for job in jobs:
         newest[job["recordingId"]] = job
-    return [j for j in jobs if newest[j["recordingId"]] is j]
+    return [
+        j for j in jobs
+        if (j["status"] in ("queued", "running") if j["recordingId"] in active else newest[j["recordingId"]] is j)
+    ]
 
 
 #: Names for the models the app transcribes with on the phone (its SpeechModel.ID).
@@ -208,12 +214,14 @@ def create_app(app: App, port: int = 8765) -> FastAPI:
     local_addrs = netinfo.all_local_addresses()
     failures: dict[str, list[float]] = {}  # address -> times of recent wrong pairing codes
     penalty: dict[str, asyncio.Lock] = {}
+    last_prune = [0.0]
 
     async def throttle_failure(ip: str) -> None:
         """After 10 wrong codes in a minute from one address, answer its wrong guesses one at a
         time, a second apart, however many it sends in parallel."""
         now = time.monotonic()
-        if len(failures) > 1000:  # forget addresses that stopped guessing
+        if len(failures) > 1000 and now - last_prune[0] > 30:  # forget addresses that stopped guessing
+            last_prune[0] = now
             for key in [k for k, v in failures.items() if not v or now - v[-1] > 60]:
                 failures.pop(key, None)
                 penalty.pop(key, None)
@@ -428,8 +436,9 @@ def create_app(app: App, port: int = 8765) -> FastAPI:
             "summary": session_summary(app, entry, jobs),
             "jobs": jobs,
             "folder": str(entry.folder),
-            # Photo notes whose file is here (they come with imported backups).
-            "photos": {name: f"/ui/api/sessions/{quote(entry.id)}/photo/{quote(name)}" for name in entry.photo_names() if entry.photo_file(name)},
+            # Photo notes whose file is here (they come with imported backups or the upload extension).
+            "photos": {name: f"/ui/api/sessions/{quote(entry.id)}/photo/{quote(name)}"
+                       for name in entry.photo_names() if (entry.folder / name).is_file()},
         }
 
     @api.get("/ui/api/sessions/{sid}")
@@ -477,7 +486,7 @@ def create_app(app: App, port: int = 8765) -> FastAPI:
         if path is None:
             raise NotFound("no such photo in this session")
         media = {".png": "image/png", ".webp": "image/webp"}.get(path.suffix.lower(), "image/jpeg")
-        return FileResponse(path, media_type=media, headers={"Cache-Control": "max-age=3600"})
+        return FileResponse(path, media_type=media, headers={"Cache-Control": "no-cache"})
 
     @api.get("/ui/api/sessions/{sid}/audio/{rid}")
     def ui_audio(sid: str, rid: str):

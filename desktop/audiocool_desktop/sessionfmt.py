@@ -14,6 +14,8 @@ from datetime import datetime
 from typing import Any, Iterable
 
 AUDIO_NAME = re.compile(r"recording-\d+\.(aac|m4a)")
+#: Photos the app attaches to notes (BackupManager.PHOTO in the app is photo-[\w-]+\.jpg).
+PHOTO_NAME = re.compile(r"photo-[\w-]+\.(jpg|jpeg|png|webp)", re.IGNORECASE)
 SESSION_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 ITEM_ID_MAX = 128
 
@@ -287,9 +289,12 @@ def session_markdown(session: dict, include_transcript: bool = True, model_names
     for note in ordered_notes(session):
         label = note_label(session, note)
         text = note.get("text", "")
-        if isinstance(note.get("photo"), str) and note["photo"]:
-            # A photo shows as an image (its file is in the same folder), as in the app's notes.md.
-            text = f"![{text if text.strip() else 'Photo'}]({note['photo']})"
+        photo = note.get("photo")
+        if isinstance(photo, str) and PHOTO_NAME.fullmatch(photo):
+            # A photo shows as an image (its file is in the same folder), as in the app's notes.md;
+            # the caption is kept on one line and its brackets escaped so the link stays intact.
+            caption = " ".join(text.split()).replace("[", "\\[").replace("]", "\\]") or "Photo"
+            text = f"![{caption}]({photo})"
         out.append(f"- [{label}] {text}" if label else f"- {text}")
     if recs:
         out.append("")

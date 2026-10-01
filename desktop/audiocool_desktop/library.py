@@ -21,7 +21,6 @@ import copy
 import json
 import logging
 import os
-import re
 import secrets
 import shutil
 import threading
@@ -32,7 +31,7 @@ from typing import Any, Callable
 
 from . import sessionfmt as fmt
 from .config import atomic_write_text
-from .sessionfmt import AUDIO_NAME, BadInput
+from .sessionfmt import AUDIO_NAME, PHOTO_NAME, BadInput
 
 log = logging.getLogger(__name__)
 
@@ -40,8 +39,6 @@ SESSION_JSON = "session.json"
 NOTES_MD = "notes.md"
 SIDECAR = "audiocool-desktop.json"
 PHONE_MODEL = "phone"
-#: Photos the phone attaches to notes (BackupManager.PHOTO in the app is photo-[\w-]+\.jpg).
-PHOTO_NAME = re.compile(r"photo-[\w-]+\.(jpg|jpeg|png|webp)", re.IGNORECASE)
 # A replacement audio file whose length differs by more than this is a different recording
 # (e.g. the first upload was cut short), so a transcript of the old file no longer applies.
 STALE_TRANSCRIPT_MS = 2000
@@ -100,16 +97,6 @@ def _stat_key(folder: Path) -> tuple:
     return (st.st_mtime_ns, st.st_size) + sc_key
 
 
-def _copy_into(src: Path, folder: Path, name: str) -> None:
-    """Copies a file into a session folder atomically."""
-    tmp = folder / f".{name}.{secrets.token_hex(6)}.part"
-    try:
-        shutil.copyfile(src, tmp)
-        os.replace(tmp, folder / name)
-    finally:
-        tmp.unlink(missing_ok=True)
-
-
 @dataclass
 class Entry:
     """One session as loaded from its folder."""
@@ -120,6 +107,7 @@ class Entry:
     sidecar: dict
     key: tuple = ()
     _search: list | None = field(default=None, repr=False)
+    _photos: list | None = field(default=None, repr=False)
 
     def recording(self, rec_id: str) -> dict | None:
         return fmt.recording(self.session, rec_id)
@@ -160,12 +148,14 @@ class Entry:
 
     def photo_names(self) -> list[str]:
         """Photo files the session's notes refer to (safe names only)."""
-        names = []
-        for note in self.session.get("notes", []):
-            name = note.get("photo")
-            if isinstance(name, str) and PHOTO_NAME.fullmatch(name) and name not in names:
-                names.append(name)
-        return names
+        if self._photos is None:
+            names: list[str] = []
+            for note in self.session.get("notes", []):
+                name = note.get("photo")
+                if isinstance(name, str) and PHOTO_NAME.fullmatch(name) and name not in names:
+                    names.append(name)
+            self._photos = names
+        return self._photos
 
     def photo_file(self, name: str) -> Path | None:
         if name not in self.photo_names():
@@ -320,6 +310,7 @@ class Library:
     def _remember(self, entry: Entry) -> None:
         entry.key = _stat_key(entry.folder)
         entry._search = None
+        entry._photos = None
         self._entries[entry.id] = entry
         self._by_folder[entry.folder] = entry
 
@@ -405,7 +396,6 @@ class Library:
                 tmp.unlink(missing_ok=True)
                 raise NotFound(f"{name} is not a photo of session {session_id}")
             os.replace(tmp, entry.folder / name)
-            self._remember(entry)  # the summary's thumbnail may change
 
     def _remove_replaced_audio(self, folder: Path, session: dict) -> None:
         """Deletes audio the session no longer uses once its replacement is here (.aac -> .m4a)."""
@@ -549,54 +539,71 @@ class Library:
             session = fmt.validate_session(_read_json(src / SESSION_JSON))
         except (OSError, ValueError) as e:
             raise BadInput(f"{src.name}: unreadable session.json ({e})") from e
+
+        def wanted(name: str, folder: Path, newer: bool) -> bool:
+            s_path, d_path = src / name, folder / name
+            if not s_path.is_file():
+                return False
+            return not d_path.is_file() or (newer and d_path.stat().st_size != s_path.stat().st_size)
+
+        # 1. Decide what to copy (briefly holding the lock).
         with self._lock:
             entry = self.get(session["id"])
             if entry is not None and entry.folder.resolve() == src.resolve():
                 return "unchanged"
-            status = "unchanged"
-            if entry is None:
-                folder = self._new_folder(session)
-                sidecar = new_sidecar()
-                if (src / SIDECAR).is_file():
-                    try:
-                        sidecar = clean_sidecar(_read_json(src / SIDECAR))
-                    except (OSError, ValueError):
-                        pass
-                _apply_title_rule(session.get("title", ""), sidecar)
-                base = session
-                status = "added"
-            else:
-                folder, sidecar = entry.folder, copy.deepcopy(entry.sidecar)
-                if session.get("updatedAt", 0) > entry.session.get("updatedAt", 0):
-                    _apply_title_rule(session.get("title", ""), sidecar)
-                    base = session
-                    status = "updated"
-                else:
-                    base = self._base(entry)
-            newer = status != "unchanged"
+            newer = entry is None or session.get("updatedAt", 0) > entry.session.get("updatedAt", 0)
+            folder = entry.folder if entry is not None else self._new_folder(session)
+            source = session if newer else entry.session
+            audio = [r for r in source.get("recordings", []) if wanted(r["file"], folder, newer)]
+            photos = [n for n in Entry(id=session["id"], folder=folder, session=source, sidecar={}).photo_names() if wanted(n, folder, newer)]
             folder.mkdir(parents=True, exist_ok=True)
-            copied = False
-            for rec in base.get("recordings", []):
-                s_path, d_path = src / rec["file"], folder / rec["file"]
-                if not s_path.is_file():
-                    continue
-                if d_path.is_file() and (not newer or d_path.stat().st_size == s_path.stat().st_size):
-                    continue
-                _copy_into(s_path, folder, rec["file"])
-                self._note_new_audio(sidecar, folder, rec, self._probe_safely(d_path))
-                copied = True
-            photos = Entry(id=base["id"], folder=folder, session=base, sidecar=sidecar).photo_names()
+
+        # 2. Copy next to their destination and measure the audio, without the lock: long .aac files
+        #    take a while to read through, and the phone API shouldn't wait for that.
+        staged: list[tuple[str, Path, dict | None, int]] = []
+        try:
+            for rec in audio:
+                tmp = folder / f".{rec['file']}.{secrets.token_hex(6)}.part"
+                shutil.copyfile(src / rec["file"], tmp)
+                staged.append((rec["file"], tmp, rec, self._probe_safely(tmp)))
             for name in photos:
-                s_path, d_path = src / name, folder / name
-                if s_path.is_file() and (not d_path.is_file() or (newer and d_path.stat().st_size != s_path.stat().st_size)):
-                    _copy_into(s_path, folder, name)
-                    copied = True
-            if newer or copied:
-                self._write(folder, base, sidecar)
-                self._remove_replaced_audio(folder, base)
-                if status == "unchanged":
-                    status = "updated"
-            return status
+                tmp = folder / f".{name}.{secrets.token_hex(6)}.part"
+                shutil.copyfile(src / name, tmp)
+                staged.append((name, tmp, None, 0))
+
+            # 3. Put everything in place, against the session as it is now.
+            with self._lock:
+                entry = self.get(session["id"])
+                if entry is None:
+                    sidecar = new_sidecar()
+                    if (src / SIDECAR).is_file():
+                        try:
+                            sidecar = clean_sidecar(_read_json(src / SIDECAR))
+                        except (OSError, ValueError):
+                            pass
+                    base, status, target = session, "added", folder
+                else:
+                    sidecar, target = copy.deepcopy(entry.sidecar), entry.folder
+                    if session.get("updatedAt", 0) > entry.session.get("updatedAt", 0):
+                        base, status = session, "updated"
+                    else:
+                        base, status = self._base(entry), "unchanged"
+                _apply_title_rule(base.get("title", ""), sidecar)
+                for name, tmp, rec, duration in staged:
+                    os.replace(tmp, target / name)
+                    if rec is not None:
+                        self._note_new_audio(sidecar, target, rec, duration)
+                if status != "unchanged" or staged:
+                    entry = self._write(target, base, sidecar)
+                    self._remove_replaced_audio(target, base)
+                    if base is session:
+                        self._remove_unused_photos(entry)
+                    if status == "unchanged":
+                        status = "updated"
+                return status
+        finally:
+            for _, tmp, _, _ in staged:
+                tmp.unlink(missing_ok=True)
 
     def import_tree(self, src: Path, max_depth: int = 3) -> dict:
         """Imports every session folder found under ``src`` (a backup folder, or one session)."""

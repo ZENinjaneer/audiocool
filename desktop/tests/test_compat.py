@@ -133,6 +133,43 @@ def test_zip_import_brings_photos(env):
     assert (next(env.library.glob("*_ab12ab12ab12")) / "photo-n1.jpg").exists()
 
 
+def test_job_list_for_the_phone():
+    from audiocool_desktop.server import latest_jobs
+
+    def job(i, rec, status):
+        return {"id": f"j{i}", "recordingId": rec, "status": status}
+
+    jobs = [job(1, "r1", "error"), job(2, "r1", "done"), job(3, "r2", "running"), job(4, "r2", "error"), job(5, "r3", "error")]
+    # r1: the newest (done); r2: the one still running, not the newer cancelled one; r3: its failure.
+    assert [j["id"] for j in latest_jobs(jobs)] == ["j2", "j3", "j5"]
+    assert [j["id"] for j in latest_jobs([job(1, "r1", "queued"), job(2, "r1", "running")])] == ["j1", "j2"]
+
+
+def test_newer_backup_removes_photos_no_note_uses(env):
+    folder, s = _backup_with_photos(env.tmp / "b1")
+    env.ui("POST", "/import/path", json={"path": str(env.tmp / "b1")})
+    lib_folder = next(env.library.glob("*_ab12ab12ab12"))
+    assert (lib_folder / "photo-n2.jpg").exists()
+    s["notes"] = [n for n in s["notes"] if n["id"] != "n2"]
+    s["thumbnail"] = None
+    s["updatedAt"] += 1000
+    (folder / "session.json").write_text(json.dumps(s))
+    assert env.ui("POST", "/import/path", json={"path": str(env.tmp / "b1")}).json()["updated"] == 1
+    assert not (lib_folder / "photo-n2.jpg").exists() and (lib_folder / "photo-n1.jpg").exists()
+
+
+def test_photo_captions_dont_break_markdown():
+    from audiocool_desktop import sessionfmt as fmt
+
+    s = phone_session(recordings=[], notes=[
+        {"id": "a", "text": "Fig. [3]\nsecond line", "createdAt": T0, "photo": "photo-a.jpg"},
+        {"id": "b", "text": "odd name", "createdAt": T0 + 1, "photo": "../photo (b).jpg"},
+    ])
+    md = fmt.session_markdown(s)
+    assert "- ![Fig. \\[3\\] second line](photo-a.jpg)" in md
+    assert "- odd name" in md and "../photo" not in md
+
+
 def test_damaged_sidecar_doesnt_break_the_library(env):
     env.sync_with_audio()
     folder = next(env.library.glob("*_a1b2c3d4e5f6"))

@@ -839,11 +839,18 @@
     }
 
     // -- refresh -----------------------------------------------------------------------
+    const signature = (d) => JSON.stringify([d.session, d.summary.recordings, d.photos]);
+
     async function refresh(force = false) {
       const fresh = await api(`/sessions/${encodeURIComponent(sid)}`);
-      const sessionSig = JSON.stringify([fresh.session, fresh.summary.recordings]);
+      const sessionSig = signature(fresh);
       const changed = sessionSig !== lastSig;
-      const finished = fresh.jobs.filter((j) => wasActive.has(j.id) && j.status === 'done');
+      // Job news first, so nothing is missed while an edit holds back the redraw.
+      for (const j of fresh.jobs.filter((x) => wasActive.has(x.id) && x.status === 'done')) {
+        wasActive.delete(j.id);
+        toast(`Transcript ready (${(INFO && INFO.models.find((m) => m.id === j.model)?.name) || j.model})`);
+      }
+      fresh.jobs.filter((j) => j.status === 'queued' || j.status === 'running').forEach((j) => wasActive.add(j.id));
       const busy = editing || (document.activeElement && document.activeElement.id === 'title');
       if (changed && busy) {
         // Keep what's on screen (and what an edit refers to) until the edit is done; the next
@@ -861,11 +868,6 @@
         renderBanner();
       }
       lastSig = sessionSig;
-      for (const j of finished) {
-        wasActive.delete(j.id);
-        toast(`Transcript ready (${(INFO && INFO.models.find((m) => m.id === j.model)?.name) || j.model})`);
-      }
-      fresh.jobs.filter((j) => j.status === 'queued' || j.status === 'running').forEach((j) => wasActive.add(j.id));
       if (force) renderBanner();
     }
 
@@ -915,7 +917,7 @@
       }
     }
 
-    lastSig = JSON.stringify([data.session, data.summary.recordings]);
+    lastSig = signature(data);
     render();
     applyParams(r.params);
     const stopPoll = poll(() => refresh(), () => (data.jobs.some((j) => j.status === 'queued' || j.status === 'running') ? 1000 : 4000));
