@@ -9,7 +9,7 @@ import com.kjwindham.audiocool.data.Session
 import com.kjwindham.audiocool.data.SessionRepository
 import java.io.File
 
-/** Opens the share sheet with the notes (as Markdown text and a .md file) plus the audio files. */
+/** Opens the share sheet with the notes (as text, and as a .md file with the transcript) plus the audio files. */
 fun shareSession(context: Context, session: Session) {
     val markdown = sessionMarkdown(session)
     val dir = File(context.cacheDir, "share").apply {
@@ -17,7 +17,8 @@ fun shareSession(context: Context, session: Session) {
         mkdirs()
     }
     val name = session.title.replace(Regex("[^\\w .-]"), "_").trim().take(60).ifEmpty { "notes" }
-    val notesFile = File(dir, "$name.md").apply { writeText(markdown) }
+    // The attached file also carries the transcript; the message text stays short.
+    val notesFile = File(dir, "$name.md").apply { writeText(sessionMarkdown(session, includeTranscript = true)) }
 
     val authority = "${context.packageName}.files"
     val uris = ArrayList<Uri>()

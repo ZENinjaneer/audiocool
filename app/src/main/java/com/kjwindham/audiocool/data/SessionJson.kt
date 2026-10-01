@@ -17,6 +17,11 @@ object SessionJson {
                     put("file", r.file)
                     put("createdAt", r.createdAt)
                     put("durationMs", r.durationMs)
+                    r.transcript?.let { segments ->
+                        put("transcript", JSONArray().apply {
+                            segments.forEach { put(JSONObject().put("s", it.startMs).put("e", it.endMs).put("t", it.text)) }
+                        })
+                    }
                 })
             }
         })
@@ -46,7 +51,18 @@ object SessionJson {
             updatedAt = o.optLong("updatedAt"),
             recordings = List(recs.length()) { i ->
                 val r = recs.getJSONObject(i)
-                Recording(r.getString("id"), r.getString("file"), r.optLong("createdAt"), r.optLong("durationMs"))
+                Recording(
+                    id = r.getString("id"),
+                    file = r.getString("file"),
+                    createdAt = r.optLong("createdAt"),
+                    durationMs = r.optLong("durationMs"),
+                    transcript = r.optJSONArray("transcript")?.let { a ->
+                        List(a.length()) { j ->
+                            val t = a.getJSONObject(j)
+                            TranscriptSegment(t.getLong("s"), t.getLong("e"), t.getString("t"))
+                        }
+                    },
+                )
             },
             notes = List(notes.length()) { i ->
                 val n = notes.getJSONObject(i)

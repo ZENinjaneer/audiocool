@@ -11,7 +11,12 @@ data class Recording(
     val createdAt: Long,
     /** 0 while recording, or if the app was killed before the length was saved. */
     val durationMs: Long,
+    /** What was said, in order; null until the recording has been transcribed. */
+    val transcript: List<TranscriptSegment>? = null,
 )
+
+/** A stretch of speech in a recording and the text recognized in it. */
+data class TranscriptSegment(val startMs: Long, val endMs: Long, val text: String)
 
 data class Note(
     val id: String,

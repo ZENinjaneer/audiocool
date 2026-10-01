@@ -8,6 +8,7 @@ import android.os.SystemClock
 import com.kjwindham.audiocool.data.Recording
 import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.data.newId
+import com.kjwindham.audiocool.transcribe.TranscriptionController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -139,6 +140,7 @@ object RecorderController {
         if (st.sessionId != null && st.recId != null) {
             SessionRepository.setRecordingDuration(st.sessionId, st.recId, duration)
             SessionRepository.convertToM4a(st.sessionId, st.recId)
+            TranscriptionController.onRecordingFinished(st.sessionId, st.recId)
         }
         _state.value = State()
     }

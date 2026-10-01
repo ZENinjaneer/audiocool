@@ -5,6 +5,7 @@ import com.kjwindham.audiocool.data.NoteFocus
 import com.kjwindham.audiocool.data.Recording
 import com.kjwindham.audiocool.data.Session
 import com.kjwindham.audiocool.data.SessionJson
+import com.kjwindham.audiocool.data.TranscriptSegment
 import com.kjwindham.audiocool.data.currentNoteId
 import com.kjwindham.audiocool.data.highlightedNoteId
 import com.kjwindham.audiocool.data.playbackStartFor
@@ -120,6 +121,16 @@ class SessionLogicTest {
     }
 
     @Test
+    fun markdownCanIncludeTheTranscript() {
+        val s = session(
+            listOf(rec1.copy(transcript = listOf(TranscriptSegment(65_000, 70_000, "The Krebs cycle.")))),
+            listOf(Note("a", "intro", 1_010_000, "r1", 10_000)),
+        )
+        assertTrue(sessionMarkdown(s, includeTranscript = true).contains("## Transcript\n\n- [01:05] The Krebs cycle.\n"))
+        assertFalse(sessionMarkdown(s).contains("Transcript"))
+    }
+
+    @Test
     fun markdownListsNotesWithTimestamps() {
         val s = session(listOf(rec1), listOf(Note("a", "intro", 1_010_000, "r1", 10_000), Note("b", "agenda", 900_000)))
         val md = sessionMarkdown(s)
@@ -130,8 +141,9 @@ class SessionLogicTest {
 
     @Test
     fun jsonRoundTrips() {
+        val transcribed = rec1.copy(transcript = listOf(TranscriptSegment(2_050, 5_830, "Ask not what your country can do for you.")))
         val s = Session(
-            "s1", "Bio 101 \"Lecture\" ✓", 1, 2, listOf(rec1, rec2),
+            "s1", "Bio 101 \"Lecture\" ✓", 1, 2, listOf(transcribed, rec2.copy(transcript = emptyList())),
             listOf(Note("a", "line one\nline two", 5, "r1", 1234), Note("b", "plain", 6)),
         )
         assertEquals(s, SessionJson.decode(SessionJson.encode(s)))

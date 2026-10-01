@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.util.AtomicFile
 import android.util.Log
+import androidx.annotation.VisibleForTesting
 import com.kjwindham.audiocool.audio.remuxAdtsToM4a
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -13,6 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.io.FileNotFoundException
 import java.util.concurrent.Executors
@@ -80,6 +82,22 @@ object SessionRepository {
         background.launch { convertNow(sessionId, recId) }
     }
 
+    fun setTranscript(sessionId: String, recId: String, transcript: List<TranscriptSegment>) =
+        update(sessionId, touch = false) { s ->
+            s.copy(recordings = s.recordings.map { if (it.id == recId) it.copy(transcript = transcript) else it })
+        }
+
+    /** Adds a session restored from a backup; its audio files must already be in [sessionDir]. */
+    fun importSession(session: Session): Boolean {
+        var added = false
+        _sessions.update { list ->
+            added = list.none { it.id == session.id }
+            if (added) list + session else list
+        }
+        if (added) persist(session.id)
+        return added
+    }
+
     fun addNote(sessionId: String, note: Note) = update(sessionId) { it.copy(notes = it.notes + note) }
 
     fun editNote(sessionId: String, noteId: String, text: String) = update(sessionId) { s ->
@@ -88,6 +106,10 @@ object SessionRepository {
 
     fun deleteNote(sessionId: String, noteId: String) =
         update(sessionId) { s -> s.copy(notes = s.notes.filterNot { it.id == noteId }) }
+
+    /** Waits for queued disk writes and deletes to finish; for tests. */
+    @VisibleForTesting
+    fun awaitIo() = runBlocking { io.launch { }.join() }
 
     fun readDurationMs(file: File): Long {
         val mmr = MediaMetadataRetriever()

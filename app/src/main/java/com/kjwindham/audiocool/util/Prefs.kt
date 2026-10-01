@@ -14,4 +14,28 @@ class Prefs(context: Context) {
     var askedNotificationPermission: Boolean
         get() = sp.getBoolean("asked_notification_permission", false)
         set(value) = sp.edit { putBoolean("asked_notification_permission", value) }
+
+    /** Transcribe each new recording when it stops (only once the speech model is downloaded). */
+    var autoTranscribe: Boolean
+        get() = sp.getBoolean("auto_transcribe", true)
+        set(value) = sp.edit { putBoolean("auto_transcribe", value) }
+
+    /** Recordings waiting to be transcribed, as "sessionId:recId,...". */
+    var transcriptionQueue: String
+        get() = sp.getString("transcription_queue", "").orEmpty()
+        set(value) = sp.edit { putString("transcription_queue", value) }
+
+    /** The folder (a Storage Access Framework tree URI) that backups go to, if set. */
+    var backupFolder: String?
+        get() = sp.getString("backup_folder", null)
+        set(value) = sp.edit { putString("backup_folder", value) }
+
+    var lastBackupAt: Long
+        get() = sp.getLong("last_backup_at", 0L)
+        set(value) = sp.edit { putLong("last_backup_at", value) }
+
+    /** What each session looked like when it was last backed up, so unchanged ones are skipped. */
+    var backupFingerprints: String
+        get() = sp.getString("backup_fingerprints", "").orEmpty()
+        set(value) = sp.edit { putString("backup_fingerprints", value) }
 }

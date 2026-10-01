@@ -62,6 +62,8 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SliderState
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -102,10 +104,12 @@ import com.kjwindham.audiocool.data.Note
 import com.kjwindham.audiocool.data.Recording
 import com.kjwindham.audiocool.data.Session
 import com.kjwindham.audiocool.data.SessionRepository
+import com.kjwindham.audiocool.data.TranscriptSegment
 import com.kjwindham.audiocool.data.NoteFocus
 import com.kjwindham.audiocool.data.highlightedNoteId
 import com.kjwindham.audiocool.data.newId
 import com.kjwindham.audiocool.data.playbackStartFor
+import com.kjwindham.audiocool.transcribe.TranscriptionController
 import com.kjwindham.audiocool.util.Prefs
 import com.kjwindham.audiocool.util.formatTime
 import com.kjwindham.audiocool.util.isEnterKeystroke
@@ -121,10 +125,11 @@ private val Speeds = listOf(1f, 1.25f, 1.5f, 2f, 0.75f)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SessionScreen(session: Session, onBack: () -> Unit) {
+fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
     val context = LocalContext.current
     val rec by RecorderController.state.collectAsStateWithLifecycle()
     val player by PlayerController.state.collectAsStateWithLifecycle()
+    val transcription by TranscriptionController.state.collectAsStateWithLifecycle()
     val prefs = remember { Prefs(context) }
     var leadInSec by remember { mutableIntStateOf(prefs.leadInSeconds) }
     val snackbar = remember { SnackbarHostState() }
@@ -149,6 +154,8 @@ fun SessionScreen(session: Session, onBack: () -> Unit) {
     var confirmDelete by remember { mutableStateOf(false) }
     var pickLeadIn by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Note?>(null) }
+    var tab by rememberSaveable(session.id) { mutableIntStateOf(initialTab) }
+    var confirmModelDownload by remember { mutableStateOf(false) }
 
     LaunchedEffect(rec.error) {
         rec.error?.let {
@@ -256,6 +263,21 @@ fun SessionScreen(session: Session, onBack: () -> Unit) {
 
     fun ensureLoaded(): Boolean = selected != null && PlayerController.load(session.id, selected)
 
+    fun transcribeSession() {
+        val ids = session.recordings.filter { it.durationMs > 0 && it.transcript == null }.map { it.id }
+        if (ids.isNotEmpty()) TranscriptionController.enqueue(session.id, ids)
+    }
+
+    fun playSegment(recording: Recording, segment: TranscriptSegment) {
+        if (rec.status != RecorderController.Status.IDLE) {
+            toast("Stop recording to play back")
+            return
+        }
+        selectedRecId = recording.id
+        // A moment early, so the first word isn't clipped.
+        PlayerController.playFrom(session.id, recording, (segment.startMs - 300).coerceAtLeast(0L))
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -323,15 +345,30 @@ fun SessionScreen(session: Session, onBack: () -> Unit) {
                     }
                 }
             }
-            HorizontalDivider()
-            NotesList(
-                session = session,
-                player = player,
-                recordingHere = recordingHere,
-                modifier = Modifier.weight(1f),
-                onTap = { note -> if (note.offsetMs != null) playNote(note) else editing = note },
-                onEdit = { editing = it },
-            )
+            TabRow(selectedTabIndex = tab) {
+                Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Notes") })
+                Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Transcript") })
+            }
+            if (tab == 0) {
+                NotesList(
+                    session = session,
+                    player = player,
+                    recordingHere = recordingHere,
+                    modifier = Modifier.weight(1f),
+                    onTap = { note -> if (note.offsetMs != null) playNote(note) else editing = note },
+                    onEdit = { editing = it },
+                )
+            } else {
+                TranscriptPane(
+                    session = session,
+                    player = player,
+                    transcription = transcription,
+                    recordingHere = recordingHere,
+                    onTranscribe = { if (transcription.modelReady) transcribeSession() else confirmModelDownload = true },
+                    onPlay = ::playSegment,
+                    modifier = Modifier.weight(1f),
+                )
+            }
             Composer(
                 draft = draft,
                 stampLabel = draftStamp()?.let { noteLabel(session, Note("", "", 0, it.recId, it.offsetMs)) },
@@ -343,6 +380,15 @@ fun SessionScreen(session: Session, onBack: () -> Unit) {
         }
     }
 
+    if (confirmModelDownload) {
+        ModelDownloadDialog(
+            onConfirm = {
+                confirmModelDownload = false
+                transcribeSession()
+            },
+            onDismiss = { confirmModelDownload = false },
+        )
+    }
     if (renaming) {
         TextInputDialog(
             title = "Rename session",

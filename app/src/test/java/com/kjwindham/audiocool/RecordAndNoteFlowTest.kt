@@ -24,7 +24,12 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.kjwindham.audiocool.audio.PlayerController
 import com.kjwindham.audiocool.audio.RecorderController
 import com.kjwindham.audiocool.audio.RecordingService
+import com.kjwindham.audiocool.data.Note
+import com.kjwindham.audiocool.data.Recording
 import com.kjwindham.audiocool.data.SessionRepository
+import com.kjwindham.audiocool.data.TranscriptSegment
+import com.kjwindham.audiocool.transcribe.TranscriptionController
+import com.kjwindham.audiocool.transcribe.TranscriptionService
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -62,6 +67,66 @@ class RecordAndNoteFlowTest {
     fun cleanUp() {
         RecorderController.stop()
         PlayerController.release()
+        TranscriptionController.cancelAll()
+    }
+
+    @Test
+    fun searchFindsWhatWasSaidAndPlaysFromThere() {
+        val session = SessionRepository.create("Bio 101")
+        val file = File(SessionRepository.sessionDir(session.id).apply { mkdirs() }, "recording-1.m4a").apply { writeBytes(ByteArray(16)) }
+        SessionRepository.addRecording(session.id, Recording("r1", file.name, 1_000L, 60_000))
+        SessionRepository.setTranscript(
+            session.id, "r1",
+            listOf(
+                TranscriptSegment(2_000, 6_000, "Mitochondria are the powerhouse of the cell."),
+                TranscriptSegment(30_000, 34_000, "The Krebs cycle happens in the matrix."),
+            ),
+        )
+        SessionRepository.addNote(session.id, Note("n1", "Krebs = energy", 1_031_000, "r1", 31_000))
+        ShadowMediaPlayer.addMediaInfo(DataSource.toDataSource(file.absolutePath), ShadowMediaPlayer.MediaInfo(60_000, 0))
+        compose.waitForIdle()
+
+        // Search everything from the main screen: the spoken words and the note both match.
+        compose.onNodeWithContentDescription("Search").performClick()
+        compose.onNode(hasSetTextAction()).performTextInput("krebs")
+        advance(1)
+        // The search runs off the main thread; wait for its results.
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("2 results").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("2 results").assertIsDisplayed()
+        screenshot("6-search")
+
+        // Tapping what was said opens the transcript there and plays from just before it.
+        compose.onNodeWithText("The Krebs cycle happens in the matrix.").performClick()
+        compose.waitForIdle()
+        assertTrue(PlayerController.state.value.isPlaying)
+        assertEquals(29_700L, PlayerController.state.value.positionMs)
+        compose.onNode(hasText("The Krebs cycle happens in the matrix.") and isSelected()).assertExists()
+        screenshot("7-transcript")
+
+        // The transcript has its own search.
+        compose.onAllNodes(hasSetTextAction())[0].performTextInput("powerhouse")
+        compose.waitForIdle()
+        compose.onNodeWithText("1 match").assertIsDisplayed()
+        compose.onNodeWithText("The Krebs cycle happens in the matrix.").assertDoesNotExist()
+    }
+
+    @Test
+    fun transcribeAsksBeforeDownloadingTheModelThenQueuesTheSession() {
+        val session = SessionRepository.create("History")
+        SessionRepository.addRecording(session.id, Recording("r1", "recording-1.m4a", 1_000L, 60_000))
+        compose.waitForIdle()
+        compose.onNodeWithText("History").performClick()
+        compose.onNodeWithText("Transcript").performClick()
+        compose.onNodeWithText("Not transcribed yet").assertIsDisplayed()
+
+        compose.onNodeWithText("Transcribe").performClick()
+        compose.onNodeWithText("Download the speech model?").assertIsDisplayed()
+        compose.onNodeWithText("Download and transcribe").performClick()
+        compose.waitForIdle()
+
+        assertTrue(TranscriptionController.state.value.isPending(session.id, "r1"))
+        assertEquals(TranscriptionService::class.java.name, shadowOf(app).nextStartedService.component?.className)
+        compose.onNodeWithText("Waiting to transcribe…").assertIsDisplayed()
     }
 
     @Test

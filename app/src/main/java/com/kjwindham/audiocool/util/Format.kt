@@ -20,14 +20,16 @@ fun formatDate(ms: Long): String = SimpleDateFormat("MMM d, yyyy · h:mm a", Loc
 fun defaultSessionTitle(now: Long = System.currentTimeMillis()): String =
     SimpleDateFormat("EEE MMM d, h:mm a", Locale.getDefault()).format(Date(now))
 
-/** "03:12", or "#2 03:12" when the session has several recordings. Null if the note isn't linked. */
-fun noteLabel(session: Session, note: Note): String? {
-    val offset = note.offsetMs ?: return null
-    val number = session.recordingNumber(note.recId)
+/** "03:12", or "#2 03:12" when the session has several recordings. Null if the recording is gone. */
+fun timeLabel(session: Session, recId: String?, offsetMs: Long): String? {
+    val number = session.recordingNumber(recId)
     if (number == 0) return null
-    val time = formatTime(offset)
+    val time = formatTime(offsetMs)
     return if (session.recordings.size > 1) "#$number $time" else time
 }
+
+/** The note's [timeLabel], or null if the note isn't linked to the audio. */
+fun noteLabel(session: Session, note: Note): String? = note.offsetMs?.let { timeLabel(session, note.recId, it) }
 
 /**
  * True when the edit from [old] to [new] is the Enter key: one new line break, either typed on its
@@ -48,7 +50,7 @@ fun removeEnter(old: String, new: String): String =
         new.removeRange(at, at + 1)
     }
 
-fun sessionMarkdown(session: Session): String = buildString {
+fun sessionMarkdown(session: Session, includeTranscript: Boolean = false): String = buildString {
     appendLine("# ${session.title}")
     append(formatDate(session.createdAt))
     val recs = session.recordings
@@ -64,5 +66,15 @@ fun sessionMarkdown(session: Session): String = buildString {
     if (recs.isNotEmpty()) {
         appendLine()
         appendLine("Audio: " + recs.joinToString { "${it.file} (${formatTime(it.durationMs)})" })
+    }
+    if (includeTranscript && recs.any { !it.transcript.isNullOrEmpty() }) {
+        appendLine()
+        appendLine("## Transcript")
+        appendLine()
+        for (rec in recs) {
+            for (segment in rec.transcript.orEmpty()) {
+                appendLine("- [${timeLabel(session, rec.id, segment.startMs)}] ${segment.text}")
+            }
+        }
     }
 }

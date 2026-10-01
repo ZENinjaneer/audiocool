@@ -1,3 +1,5 @@
+import java.net.URI
+import java.security.MessageDigest
 import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -13,6 +15,41 @@ val keystoreProps = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
+// On-device speech recognition (sherpa-onnx). The official AAR isn't published to Maven, so the
+// build fetches it from sherpa-onnx's GitHub release and checks it against a pinned checksum.
+val sherpaVersion = "1.13.8"
+val sherpaAar = file("libs/sherpa-onnx-static-link-onnxruntime-$sherpaVersion.aar")
+val sherpaSha256 = "b22c3fc1b6a45666d28892bb2f7694beeb77a8362d7ebd77c1a5431ec9435471"
+
+fun sha256(f: File): String {
+    val md = MessageDigest.getInstance("SHA-256")
+    f.inputStream().use { input ->
+        val buf = ByteArray(1 shl 16)
+        while (true) {
+            val n = input.read(buf)
+            if (n < 0) break
+            md.update(buf, 0, n)
+        }
+    }
+    return md.digest().joinToString("") { "%02x".format(it) }
+}
+
+val fetchSherpaOnnx by tasks.registering {
+    description = "Downloads the sherpa-onnx Android library if it isn't in app/libs yet."
+    outputs.file(sherpaAar)
+    doLast {
+        if (sherpaAar.exists() && sha256(sherpaAar) == sherpaSha256) return@doLast
+        val url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$sherpaVersion/${sherpaAar.name}"
+        logger.lifecycle("Downloading $url")
+        sherpaAar.parentFile.mkdirs()
+        val part = File(sherpaAar.path + ".part")
+        URI(url).toURL().openStream().use { input -> part.outputStream().use { input.copyTo(it) } }
+        val actual = sha256(part)
+        check(actual == sherpaSha256) { "Checksum mismatch for ${sherpaAar.name}: got $actual" }
+        check(part.renameTo(sherpaAar)) { "Couldn't move ${part.name} into place" }
+    }
+}
+
 android {
     namespace = "com.kjwindham.audiocool"
     compileSdk = 35
@@ -21,8 +58,12 @@ android {
         applicationId = "com.kjwindham.audiocool"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
+        // The speech engine is native code; ship only the 64-bit ARM build every current phone uses.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     signingConfigs {
@@ -65,12 +106,26 @@ android {
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        // Compressing the native library keeps the APK download about 15 MB smaller.
+        jniLibs.useLegacyPackaging = true
     }
 }
 
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
+    }
+}
+
+tasks.named("preBuild") { dependsOn(fetchSherpaOnnx) }
+
+// Optional: -PsherpaHostDir=<dir> runs the real speech engine in unit tests on Linux x86_64. The dir
+// holds lib/ (sherpa-onnx's linux-x64 JNI libraries), models/ and silero_vad.onnx; without it, those
+// tests are skipped.
+tasks.withType<Test>().configureEach {
+    providers.gradleProperty("sherpaHostDir").orNull?.let { dir ->
+        systemProperty("sherpa.host.dir", dir)
+        systemProperty("java.library.path", "$dir/lib")
     }
 }
 
@@ -83,7 +138,9 @@ dependencies {
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation(files(sherpaAar))
 
     testImplementation("junit:junit:4.13.2")
     // Android's org.json is a stub in local unit tests; use the real one.

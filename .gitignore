@@ -8,3 +8,7 @@ local.properties
 # Release signing key: back these up, but never commit them.
 keystore.properties
 keystore/
+
+# Fetched by the build (see app/build.gradle.kts).
+app/libs/*.aar
+app/libs/*.part
