@@ -129,7 +129,9 @@ are kept. Or set the library folder (Settings) to the backup folder itself.
 Chosen from the [Open ASR Leaderboard](https://huggingface.co/spaces/hf-audio/open_asr_leaderboard)
 as of 25 Sept 2026. The best open-weights English models there are Qwen3-ASR 1.7B (4.31 % mean
 WER), Hojo-ASR (4.33 %), Higgs Audio v3 STT (4.39 %) and Canary-Qwen 2.5B (4.43 %); Parakeet TDT
-0.6B v2/v3 sit at 4.7–4.9 % with ~15x the throughput; Whisper large-v3 is at 5.78 %.
+0.6B v2/v3 sit at 4.7–4.9 % with about 7x Qwen3-ASR's throughput there (RTFx ~6000 vs 820);
+Whisper large-v3 is at 5.78 %. Among the long-form results, the best open model (Cohere
+Transcribe) needs a Hugging Face login to download, so it isn't offered.
 
 | Id | Model | Use | Runs on |
 |---|---|---|---|
