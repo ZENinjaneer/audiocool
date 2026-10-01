@@ -37,6 +37,38 @@ def _ends_sentence(text: str) -> bool:
     return True
 
 
+_FILLERS = {"uh", "um", "uhm", "umm", "uhh", "er", "erm", "hmm", "mm", "mhm"}
+_TRAILING_STOP = re.compile(r"[.!?…]+$")
+
+
+def drop_fillers(words: list[Word]) -> list[Word]:
+    """Removes hesitation sounds ("uh", "um") that some models write out, keeping sentence
+    punctuation and capitalisation intact: "Uh, so we start." -> "So we start."."""
+    out: list[Word] = []
+    capitalize_next = False
+    prefix = ""  # an opening quote or bracket that was attached to a removed filler
+    for w in words:
+        core = w.text.strip(".,!?;:…\"'“”‘’()[]-—–").lower()
+        if core in _FILLERS:
+            stop = _TRAILING_STOP.search(w.text)
+            if stop and out and not re.search(r"[.!?…,;:]$", out[-1].text):
+                out[-1].text += stop.group(0)
+            first = next((k for k, c in enumerate(w.text) if c.isalpha()), 0)
+            prefix += w.text[:first]
+            if w.text[first:first + 1].isupper() and (not out or _ends_sentence(out[-1].text)):
+                capitalize_next = True
+            continue
+        if capitalize_next or prefix:
+            text = w.text
+            i = next((k for k, c in enumerate(text) if c.isalpha()), None)
+            if capitalize_next and i is not None:
+                text = text[:i] + text[i].upper() + text[i + 1:]
+            w = Word(prefix + text, w.start, w.end)
+            capitalize_next, prefix = False, ""
+        out.append(w)
+    return out
+
+
 def _is_cjk(ch: str) -> bool:
     return unicodedata.east_asian_width(ch) in ("W", "F") and unicodedata.category(ch).startswith("L")
 

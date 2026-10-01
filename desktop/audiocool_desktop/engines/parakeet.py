@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import gc
 import logging
+import warnings
 
 import numpy as np
 
@@ -136,7 +137,9 @@ class ParakeetEngine(Engine):
         for batch in batches:
             if cancelled():
                 raise Cancelled()
-            with torch.inference_mode():
+            with torch.inference_mode(), warnings.catch_warnings():
+                # (The transducer stops at the end of the audio; generate's max_length notice doesn't apply.)
+                warnings.filterwarnings("ignore", message=".*max_length.*")
                 # Spectrograms on the GPU too: on the CPU they cost more than the model run.
                 feats, mask = features(self.processor.feature_extractor, [chunks[i] for i in batch], self.device)
                 out = self.model.generate(input_features=feats.to(self.dtype), attention_mask=mask, return_dict_in_generate=True)

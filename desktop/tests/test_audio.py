@@ -138,6 +138,18 @@ def test_long_pause_breaks_a_line():
     assert [s["t"] for s in segs] == ["we talked about this and then", "after a long break we went on"]
 
 
+def test_fillers_are_dropped():
+    from audiocool_desktop.engines.segmenter import drop_fillers, join_words
+
+    def clean(text):
+        return join_words(drop_fillers(words_from(text)))
+
+    assert clean("Uh, so we start here.") == "So we start here."
+    assert clean("we make electricity today uh.") == "we make electricity today."
+    assert clean('I said "um, no."') == 'I said "no."'
+    assert clean("The umbrella and the hmmm sound") == "The umbrella and the hmmm sound"
+
+
 def test_abbreviations_dont_end_sentences():
     segs = build_segments(words_from("Then Dr. Smith and Mr. Jones arrived in the U.S. late at night for the meeting."))
     assert len(segs) == 1

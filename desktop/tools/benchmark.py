@@ -36,6 +36,21 @@ def normalize(text: str) -> list[str]:
     return [w for w in words if w]
 
 
+_WN = []
+
+
+def whisper_normalizer():
+    """Whisper's English text normalizer, if installed (pip install whisper-normalizer)."""
+    if not _WN:
+        try:
+            from whisper_normalizer.english import EnglishTextNormalizer
+
+            _WN.append(EnglishTextNormalizer())
+        except ImportError:
+            _WN.append(None)
+    return _WN[0]
+
+
 def wer(ref: list[str], hyp: list[str]) -> dict:
     """Word error rate with substitution/deletion/insertion counts (Levenshtein on words)."""
     n, m = len(ref), len(hyp)
@@ -142,6 +157,9 @@ def main() -> int:
             if ref:
                 row.update({f"wer_{k}" if k != "wer" else "wer": v for k, v in wer(normalize(ref), normalize(hyp)).items()})
                 row["wer"] = round(row["wer"] * 100, 2)
+                wn = whisper_normalizer()
+                if wn is not None:  # the Open ASR Leaderboard's normalizer (numbers, spellings, fillers)
+                    row["wer_whisper_norm"] = round(wer(wn(ref).split(), wn(hyp).split())["wer"] * 100, 2)
             results.append(row)
             print(json.dumps(row), flush=True)
             if args.save_transcripts:
@@ -149,10 +167,11 @@ def main() -> int:
                 out.write_text("\n".join(f"[{s['s'] / 1000:8.2f} - {s['e'] / 1000:8.2f}] {s['t']}" for s in res.segments))
         registry.unload()
 
-    print("\n| Model | Device | Audio | WER % | Time | RTFx | Segments (median s) |")
-    print("|---|---|---|---|---|---|---|")
+    print("\n| Model | Device | Audio | WER % | WER % (Whisper norm.) | Time | RTFx | Lines (median s) |")
+    print("|---|---|---|---|---|---|---|---|")
     for r in results:
-        print(f"| {r['name']} | {r['device']} | {r['audio']} ({r['audio_s'] / 60:.1f} min) | {r.get('wer', '-')} | {r['wall_s']} s | {r['rtfx']}x | {r['segments']} ({r['seg_len_s']['median']}) |")
+        print(f"| {r['name']} | {r['device']} | {r['audio']} ({r['audio_s'] / 60:.1f} min) | {r.get('wer', '-')} | {r.get('wer_whisper_norm', '-')} "
+              f"| {r['wall_s']} s | {r['rtfx']}x | {r['segments']} ({r['seg_len_s']['median']}) |")
     if args.json:
         Path(args.json).write_text(json.dumps(results, indent=2))
     return 0

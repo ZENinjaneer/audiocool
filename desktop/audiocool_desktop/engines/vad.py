@@ -69,7 +69,7 @@ def speech_probs(audio: np.ndarray, streams: int | None = None) -> np.ndarray:
     out = torch.empty(streams, per + warm)
     threads = torch.get_num_threads()
     with _lock, torch.inference_mode():
-        torch.set_num_threads(min(threads, 8))  # tiny ops: more threads only add overhead
+        torch.set_num_threads(min(threads, 4))  # tiny ops: more threads only add overhead and contention
         try:
             model.reset_states()  # the model sizes its state to the batch on the first call
             for i in range(per + warm):

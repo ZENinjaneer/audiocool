@@ -44,6 +44,7 @@
     copy: '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></svg>',
     refresh: '<svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66L20 8.5"/><path d="M20 3.5v5h-5"/></svg>',
     chip: '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9.5 2.5v3.5M14.5 2.5v3.5M9.5 18v3.5M14.5 18v3.5M2.5 9.5H6M2.5 14.5H6M18 9.5h3.5M18 14.5h3.5"/></svg>',
+    heading: '<svg viewBox="0 0 24 24"><path d="M6 4.5v15M18 4.5v15M6 12h12"/></svg>',
     zip: '<svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M10 7h2M10 10h2M10 13h2M10 16h2v2h-2z"/></svg>',
   };
   const icon = (name) => raw(ICONS[name] || '');
@@ -79,7 +80,7 @@
   const fmtDate = (ms) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
   const fmtClock = (ms) => new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   const fmtDateTime = (ms) => `${fmtDate(ms)} · ${fmtClock(ms)}`;
-  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const plural = (n, word) => `${n} ${n === 1 ? word : /(s|x|ch|sh)$/.test(word) ? `${word}es` : `${word}s`}`;
   function ago(ms) {
     const s = Math.round((Date.now() - ms) / 1000);
     if (s < 45) return 'just now';
@@ -184,6 +185,7 @@
     if (page && page.key === key && page.update) { page.update(r); return; }
     if (page && page.cleanup) page.cleanup();
     closeMenus();
+    if (r.name !== 'search' && document.activeElement !== searchInput) searchInput.value = '';
     const fn = routes[r.name] || routes.notfound;
     page = { name: r.name, key };
     const mine = page;
@@ -353,8 +355,8 @@
             <div class="hit-group-head"><a href="#/session/${encodeURIComponent(sid)}">${hits[0].sessionTitle || 'Untitled'}</a>
               <span class="muted small">${fmtDateTime(hits[0].sessionCreatedAt)}</span><span class="muted small">· ${plural(hits.length, 'match')}</span></div>
             ${hits.map((h) => html`<a class="hit" href="${hitLink(h)}">
-              <span class="kind ${h.kind}" title="${h.kind === 'note' ? 'Note' : 'Transcript'}">${icon(h.kind === 'note' ? 'note' : 'speech')}</span>
-              <span class="chip">${h.label || '—'}</span>
+              <span class="kind ${h.kind}" title="${{ note: 'Note', speech: 'Transcript', title: 'Title' }[h.kind]}">${icon({ note: 'note', speech: 'speech', title: 'heading' }[h.kind])}</span>
+              <span class="chip">${h.kind === 'title' ? 'title' : h.label || '—'}</span>
               <span>${highlight(h.text, h.matches)}</span></a>`)}
           </div>`;
         })}`);
@@ -562,7 +564,7 @@
         </div>
         <div class="player-foot"><span class="mono">${rec().file}</span><span class="sep"></span><span>${fmtDuration(total)}</span>
           ${markers.length ? html`<span class="sep"></span><span><span style="display:inline-block;width:4px;height:10px;border-radius:2px;background:var(--note);vertical-align:-1px;margin-right:6px"></span>${plural(markers.length, 'note')} on the timeline</span>` : ''}
-          <span class="sep"></span><span>Space play/pause · ← → 5 s</span></div>`);
+          <span class="sep hint"></span><span class="hint">Space play/pause · ← → 5 s</span></div>`);
       $('#play', box).addEventListener('click', togglePlay);
       $('#back', box).addEventListener('click', () => seekBy(-10000));
       $('#fwd', box).addEventListener('click', () => seekBy(10000));
@@ -680,7 +682,7 @@
       }
       box.innerHTML = out(lines.map((seg, i) => html`<div class="line" data-i="${i}">
         <span class="chip">${fmtTime(seg.s)}</span>
-        <div><span class="line-text">${seg.t}</span><button class="icon-btn edit-btn" title="Edit this line" aria-label="Edit line">${icon('edit')}</button></div></div>`));
+        <span class="line-text">${seg.t}</span><button class="icon-btn edit-btn" title="Edit this line" aria-label="Edit line">${icon('edit')}</button></div>`));
       box.onclick = (e) => {
         const line = e.target.closest('.line');
         if (!line || editing) return;
@@ -1044,11 +1046,12 @@
         </section>
         <section class="card card-pad" style="margin-top:18px">
           <h2>Windows firewall (one time)</h2>
-          <p class="muted">WSL in mirrored networking mode shares the Windows network, so the phone connects to this PC's address. Windows Defender Firewall and the Hyper-V firewall for WSL must let port ${info.port} in. Run in <strong>PowerShell as Administrator</strong>:</p>
-          <pre class="cmd">New-NetFirewallRule -DisplayName "AudioCool Desktop" -Direction Inbound -Protocol TCP -LocalPort ${info.port} -Action Allow -Profile Private
-Set-NetFirewallHyperVVMSetting -Name '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -DefaultInboundAction Allow
-# or, narrower: New-NetFirewallHyperVRule -Name AudioCool -DisplayName "AudioCool Desktop" -Direction Inbound -VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -Protocol TCP -LocalPorts ${info.port}</pre>
-          <p class="muted small" style="margin-top:10px">Your Wi-Fi should be set to a <em>Private</em> network in Windows settings. See README.md for details.</p>
+          <p class="muted">With WSL's mirrored networking the phone connects to this PC's own address, so two firewalls must let port ${info.port} in: Windows Defender Firewall and the Hyper-V firewall that guards WSL. Run in <strong>PowerShell as Administrator</strong>:</p>
+          <pre class="cmd">New-NetFirewallRule -DisplayName "AudioCool Desktop" -Direction Inbound -Protocol TCP -LocalPort ${info.port} -Action Allow
+
+New-NetFirewallHyperVRule -Name "AudioCool-Desktop" -DisplayName "AudioCool Desktop (WSL)" -Direction Inbound \`
+  -VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -Protocol TCP -LocalPorts ${info.port}</pre>
+          <p class="muted small" style="margin-top:10px">Still no luck? Check that the phone is on the same Wi-Fi and that Windows treats it as a <em>Private</em> network. README.md has more (including how to undo these rules).</p>
         </section>`);
       $('#copy', el).addEventListener('click', async () => { try { await navigator.clipboard.writeText(info.token); toast('Code copied'); } catch (e) { toast(info.token); } });
       $('#reset', el).addEventListener('click', async () => {

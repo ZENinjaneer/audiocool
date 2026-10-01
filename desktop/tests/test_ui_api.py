@@ -44,6 +44,8 @@ def test_search_all_words_case_and_accent_insensitive(env):
     assert env.ui("GET", "/search", params={"q": "   "}).json()["hits"] == []
     unlinked = env.ui("GET", "/search", params={"q": "only"}).json()["hits"][0]
     assert unlinked["atMs"] is None and unlinked["noteId"] == "n2"
+    titles = env.ui("GET", "/search", params={"q": "bio 101"}).json()["hits"]
+    assert [(h["kind"], h["text"]) for h in titles] == [("title", "Bio 101")]
 
 
 def test_exports(env):

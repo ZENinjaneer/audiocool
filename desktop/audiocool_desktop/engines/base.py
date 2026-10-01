@@ -11,7 +11,7 @@ from typing import Callable
 import numpy as np
 
 from .. import audio as audio_io
-from .segmenter import Word, build_segments
+from .segmenter import Word, build_segments, drop_fillers
 
 log = logging.getLogger(__name__)
 
@@ -112,7 +112,7 @@ class Engine:
         t1 = time.monotonic()
         words_per_chunk = self.recognize(pieces, [a / SR for a, _ in chunks], lambda f: progress(0.04 + 0.95 * f), cancelled) if pieces else []
         t_asr = time.monotonic() - t1
-        words = [w for ws in words_per_chunk for w in ws]
+        words = drop_fillers([w for ws in words_per_chunk for w in ws])
         segments = build_segments(words)
         progress(1.0)
         return Result(

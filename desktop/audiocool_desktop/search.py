@@ -1,4 +1,4 @@
-"""Search across notes and transcripts, matching the app's rules (search/Search.kt).
+"""Search across notes and transcripts (and session titles), matching the app's rules (search/Search.kt).
 
 Every word of the query must appear (case- and accent-insensitive, as substrings). Hits carry the
 match positions in the original text for highlighting, and where in the audio they are.
@@ -59,7 +59,8 @@ def _index(entry) -> list[tuple]:
     if entry._search is not None:
         return entry._search
     s = entry.session
-    items = []
+    title = s.get("title", "")
+    items = [("title", fold(title), title, None, None, None, int(s.get("createdAt", 0)) - 1)]
     for note in s.get("notes", []):
         text = note.get("text", "")
         rec = fmt.recording(s, note.get("recId"))
