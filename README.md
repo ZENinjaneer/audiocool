@@ -71,6 +71,8 @@ directory with `lib/` (sherpa-onnx's `linux-x64-jni` libraries), `models/` (the 
 its `test_wavs/`), `silero_vad.onnx` and `gtcrn_simple.onnx`. `ModelBenchmarkHostTest` compares
 models on a test set (word error rate and speed) when given `-PasrBenchDir` and `-PasrBenchModels`;
 `-PasrBenchDenoiser=<gtcrn_simple.onnx>` looks for speech in denoised audio, as the app does.
+`DesktopEndToEndHostTest` runs the phone's desktop sync against a running AudioCool Desktop when
+given `-PdesktopUrl=http://localhost:8765 -PdesktopToken=<pairing code>`.
 
 ### Transcription accuracy
 

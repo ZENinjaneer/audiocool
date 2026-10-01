@@ -135,6 +135,11 @@ tasks.withType<Test>().configureEach {
     providers.gradleProperty("asrBenchLeveling").orNull?.let { systemProperty("asr.bench.leveling", it) }
     providers.gradleProperty("asrBenchMaxSegment").orNull?.let { systemProperty("asr.bench.maxSegment", it) }
     providers.gradleProperty("asrBenchDenoiser").orNull?.let { systemProperty("asr.bench.denoiser", it) }
+    // Desktop sync against a running AudioCool Desktop (DesktopEndToEndHostTest):
+    // -PdesktopUrl=http://localhost:8765 -PdesktopToken=<pairing code>
+    providers.gradleProperty("desktopUrl").orNull?.let { systemProperty("desktop.url", it) }
+    providers.gradleProperty("desktopToken").orNull?.let { systemProperty("desktop.token", it) }
+    systemProperty("desktop.clip", rootProject.file("desktop/tests/data/jfk.m4a").path)
     maxHeapSize = "4g"
 }
 
