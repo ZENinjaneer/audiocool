@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "AudioCool"
 include(":app")
+include(":updater")

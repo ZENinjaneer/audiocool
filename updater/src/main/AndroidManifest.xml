@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!-- To read the installed AudioCool's version and signing key. -->
+    <queries>
+        <package android:name="com.kjwindham.audiocool" />
+    </queries>
+
+    <application
+        android:icon="@mipmap/ic_launcher"
+        android:label="AudioCool Updater"
+        android:theme="@android:style/Theme.DeviceDefault">
+        <activity
+            android:name=".UpdaterActivity"
+            android:exported="true"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- Where Android reports install results. Not exported, so no other app can fake one. -->
+        <activity-alias
+            android:name=".InstallResult"
+            android:exported="false"
+            android:targetActivity=".UpdaterActivity" />
+    </application>
+</manifest>
