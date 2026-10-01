@@ -267,8 +267,9 @@ that are already queued or running returns that job (its status may then be `run
  "jobs": [{"id": "5f2c9a0e1b7d", "recordingId": "r1", "model": "qwen3-asr-1.7b", "status": "running", "progress": 0.42, "error": null}]}
 ```
 
-`jobs` holds the newest job of each recording that has one (so a failure that a later job fixed
-doesn't linger; the web UI's Jobs page keeps the history). Status is `queued`, `running`, `done`
+`jobs` holds, for each recording that has jobs, its queued or running jobs if there are any, and
+otherwise its newest job (so a failure that a later job fixed doesn't linger; the web UI's Jobs
+page keeps the full history). Status is `queued`, `running`, `done`
 or `error` (a job cancelled in the web UI ends as `error` with `"error": "Cancelled"`). Jobs run
 one at a time, oldest first, on a background worker; the queue is in SQLite, and a job interrupted
 by a restart runs again. Each recording's `transcriptModel` in `session` matches `transcriptModels`
@@ -287,9 +288,10 @@ None in request/response shapes or status codes. Choices the contract left open:
 - An unknown recording id in `recordingIds` is a 400 (bad input), not a 404.
 - `transcribe` answers with the existing job (possibly `running`) for a recording and model that
   are already queued or running, instead of queuing a duplicate.
-- `GET /api/v1/sessions/{id}`: `jobs` is the newest job per recording rather than the full
-  history; `session` carries the title as the desktop has it (a title edited in the web UI wins
-  until the phone renames the session) and `transcriptModel` on each transcribed recording.
+- `GET /api/v1/sessions/{id}`: `jobs` is each recording's current state (its active jobs, else
+  its newest job) rather than the full history; `session` carries the title as the desktop has it
+  (a title edited in the web UI wins until the phone renames the session) and `transcriptModel`
+  on each transcribed recording.
 - Times above the year 9999 are rejected as bad input.
 - Addition: `files` and the upload route also accept note photos (see the extension above).
 - "Localhost only" for the web UI means requests from this computer: loopback, or one of the PC's
