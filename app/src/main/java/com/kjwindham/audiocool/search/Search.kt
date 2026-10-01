@@ -3,7 +3,7 @@ package com.kjwindham.audiocool.search
 import com.kjwindham.audiocool.data.Session
 import java.text.Normalizer
 
-enum class HitKind { NOTE, SPEECH }
+enum class HitKind { NOTE, SPEECH, PHOTO }
 
 data class SearchHit(
     val sessionId: String,
@@ -19,7 +19,7 @@ data class SearchHit(
     val timelineKey: Long = 0,
 )
 
-/** Notes and stretches of speech in [session] that contain every word of [query], in timeline order. */
+/** Notes, text on photos, and stretches of speech in [session] that contain every word of [query], in timeline order. */
 fun searchSession(session: Session, query: String): List<SearchHit> {
     val terms = searchTerms(query)
     if (terms.isEmpty()) return emptyList()
@@ -36,6 +36,25 @@ fun searchSession(session: Session, query: String): List<SearchHit> {
             matches = matches,
             recId = rec?.id,
             atMs = if (linked) offset else null,
+            noteId = note.id,
+            timelineKey = if (rec != null && offset != null) rec.createdAt + offset else note.createdAt,
+        )
+    }
+    // Text on the photos: show the lines that matched.
+    for (note in session.notes) {
+        val text = note.photoText ?: continue
+        if (findTerms(text, terms) == null) continue
+        val snippet = text.lines().filter { line -> terms.any { fold(line).contains(it) } }.take(3).joinToString(" · ")
+        val (shown, matches) = findTerms(snippet, terms)?.let { snippet to it } ?: text.replace("\n", " · ").let { it to findTerms(it, terms)!! }
+        val rec = session.recording(note.recId)
+        val offset = note.offsetMs
+        hits += SearchHit(
+            sessionId = session.id,
+            kind = HitKind.PHOTO,
+            text = shown,
+            matches = matches,
+            recId = rec?.id,
+            atMs = if (rec != null) offset else null,
             noteId = note.id,
             timelineKey = if (rec != null && offset != null) rec.createdAt + offset else note.createdAt,
         )

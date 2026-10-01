@@ -9,6 +9,10 @@ recording when you started typing it; tap a note to play from just before that m
   to that moment; tap it to see it full screen and play the recording from when it was taken. Photos
   can also come from the gallery (⋮ › Add photos from gallery): ones taken during a recording, e.g.
   with the camera app, land at the moment they were taken. Photos are saved upright at up to 2560 px.
+- **Titles from the slides:** the text in each photo is read on the phone (ML Kit). A session still
+  named after its start time takes the title from its first photo that has one: the biggest text,
+  joined across lines, skipping signs, web addresses, slide numbers and anything the reader isn't sure
+  of. A name you give a session is never changed. The text on photos is searchable too.
 - **Thumbnails and gallery view:** a session's first photo becomes its thumbnail (long-press another
   photo to use it instead). The grid button on the main screen switches between the list and a
   gallery of thumbnails with each session's name underneath; search results show them too.
@@ -87,6 +91,8 @@ same key to install over the existing app.
 - [Silero VAD](https://github.com/snakers4/silero-vad) model (MIT), in `app/src/main/assets/`.
 - [GTCRN](https://github.com/Xiaobin-Rong/gtcrn) speech enhancement model (MIT), as exported by
   sherpa-onnx, in `app/src/main/assets/`.
+- [ML Kit text recognition](https://developers.google.com/ml-kit/vision/text-recognition/v2) (Latin
+  script, bundled), for the text in photos.
 - [NVIDIA Parakeet](https://huggingface.co/nvidia/parakeet-unified-en-0.6b) speech model, converted
   for sherpa-onnx, downloaded by the app from Hugging Face on first use. Licensed by NVIDIA
   Corporation under the [NVIDIA Open Model License](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/).

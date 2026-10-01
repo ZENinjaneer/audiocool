@@ -8,6 +8,7 @@ import android.graphics.Matrix
 import android.net.Uri
 import android.provider.MediaStore
 import androidx.core.content.FileProvider
+import com.kjwindham.audiocool.ocr.SlideText
 import androidx.exifinterface.media.ExifInterface
 import java.io.File
 import java.text.ParseException
@@ -81,7 +82,10 @@ object Photos {
         val id = newId()
         val name = "photo-$id.jpg"
         val saved = runCatching { save(resolver, source, SessionRepository.photoFile(sessionId, name)) }.getOrDefault(false)
-        if (saved) SessionRepository.addNote(sessionId, Note(id, "", createdAt, recId, offsetMs, photo = name))
+        if (saved) {
+            SessionRepository.addNote(sessionId, Note(id, "", createdAt, recId, offsetMs, photo = name))
+            SlideText.photoAdded(sessionId, id)
+        }
         return saved
     }
 

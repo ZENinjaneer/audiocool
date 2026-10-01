@@ -122,6 +122,11 @@ object SessionRepository {
         if (photo != null) io.launch { photoFile(sessionId, photo).delete() }
     }
 
+    /** Saves the text found in a photo note's picture. */
+    fun setPhotoText(sessionId: String, noteId: String, text: String) = update(sessionId, touch = false) { s ->
+        s.copy(notes = s.notes.map { if (it.id == noteId) it.copy(photoText = text) else it })
+    }
+
     /** Shows the photo note [noteId] for the session in lists. */
     fun setThumbnail(sessionId: String, noteId: String) = update(sessionId) { it.copy(thumbnail = noteId) }
 

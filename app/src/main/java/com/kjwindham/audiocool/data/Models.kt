@@ -29,6 +29,8 @@ data class Note(
     val offsetMs: Long? = null,
     /** A photo (of a slide, say): a JPEG in the session's folder. [text] is then its caption. */
     val photo: String? = null,
+    /** The text found in [photo], one line per line; null until it's been read. */
+    val photoText: String? = null,
 )
 
 data class Session(

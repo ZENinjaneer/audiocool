@@ -5,6 +5,7 @@ import com.kjwindham.audiocool.audio.RecorderController
 import com.kjwindham.audiocool.backup.BackupController
 import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.desktop.DesktopSync
+import com.kjwindham.audiocool.ocr.SlideText
 import com.kjwindham.audiocool.transcribe.TranscriptionController
 
 class AudioCoolApp : Application() {
@@ -15,5 +16,6 @@ class AudioCoolApp : Application() {
         TranscriptionController.init(this)
         BackupController.init(this)
         DesktopSync.init(this)
+        SlideText.init(this)
     }
 }

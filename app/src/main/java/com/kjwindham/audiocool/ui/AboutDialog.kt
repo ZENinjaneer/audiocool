@@ -29,6 +29,7 @@ fun AboutDialog(onDismiss: () -> Unit) {
                 Credit("Speech engine: sherpa-onnx (Apache-2.0).", "sherpa-onnx on GitHub", "https://github.com/k2-fsa/sherpa-onnx")
                 Credit("Speech detection: Silero VAD (MIT).", "Silero VAD on GitHub", "https://github.com/snakers4/silero-vad")
                 Credit("Noise filtering for speech detection: GTCRN (MIT).", "GTCRN on GitHub", "https://github.com/Xiaobin-Rong/gtcrn")
+                Credit("Text in photos: Google ML Kit text recognition.", "ML Kit terms", "https://developers.google.com/ml-kit/terms")
                 Credit("Source code and updates.", "AudioCool on GitHub", "https://github.com/ZENinjaneer/audiocool")
             }
         },

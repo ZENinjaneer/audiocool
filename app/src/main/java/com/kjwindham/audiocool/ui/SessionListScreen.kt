@@ -260,7 +260,7 @@ fun SessionListScreen(
             if (searching) {
                 item(key = "search-hint", span = wide) {
                     Text(
-                        "Search your notes and everything that was said.",
+                        "Search your notes, the text on your photos, and everything that was said.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 8.dp),
@@ -458,7 +458,16 @@ private fun SearchResults(
                     Text(session.title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                 }
             }
-            items(sessionHits, key = { if (it.kind == HitKind.NOTE) "note:${it.noteId}" else "said:${it.recId}:${it.atMs}" }) { hit ->
+            items(
+                sessionHits,
+                key = {
+                    when (it.kind) {
+                        HitKind.NOTE -> "note:${it.noteId}"
+                        HitKind.PHOTO -> "photo:${it.noteId}"
+                        HitKind.SPEECH -> "said:${it.recId}:${it.atMs}"
+                    }
+                },
+            ) { hit ->
                 HitRow(session, hit, onOpenHit)
             }
         }
@@ -467,15 +476,22 @@ private fun SearchResults(
 
 @Composable
 private fun HitRow(session: Session, hit: SearchHit, onOpenHit: (SearchHit) -> Unit) {
-    val said = hit.kind == HitKind.SPEECH
     val label = hit.atMs?.let { timeLabel(session, hit.recId, it) }
     Row(
         Modifier.fillMaxWidth().clickable { onOpenHit(hit) }.padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.Top,
     ) {
         Icon(
-            if (said) AppIcons.Mic else Icons.Filled.Edit,
-            contentDescription = if (said) "Said" else "Note",
+            when (hit.kind) {
+                HitKind.SPEECH -> AppIcons.Mic
+                HitKind.PHOTO -> AppIcons.Image
+                HitKind.NOTE -> Icons.Filled.Edit
+            },
+            contentDescription = when (hit.kind) {
+                HitKind.SPEECH -> "Said"
+                HitKind.PHOTO -> "On a photo"
+                HitKind.NOTE -> "Note"
+            },
             modifier = Modifier.padding(top = 2.dp).size(18.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )

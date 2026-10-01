@@ -38,6 +38,7 @@ object SessionJson {
                         put("offsetMs", n.offsetMs)
                     }
                     n.photo?.let { put("photo", it) }
+                    n.photoText?.let { put("photoText", it) }
                 })
             }
         })
@@ -78,6 +79,7 @@ object SessionJson {
                     recId = if (n.has("recId")) n.getString("recId") else null,
                     offsetMs = if (n.has("offsetMs")) n.getLong("offsetMs") else null,
                     photo = if (n.has("photo")) n.getString("photo") else null,
+                    photoText = if (n.has("photoText")) n.getString("photoText") else null,
                 )
             },
         )
