@@ -139,6 +139,8 @@ tasks.withType<Test>().configureEach {
     // -PdesktopUrl=http://localhost:8765 -PdesktopToken=<pairing code>
     providers.gradleProperty("desktopUrl").orNull?.let { systemProperty("desktop.url", it) }
     providers.gradleProperty("desktopToken").orNull?.let { systemProperty("desktop.token", it) }
+    // The README's screenshots (ReadmeScreenshots): -PreadmeScreenshots=docs/screenshots
+    providers.gradleProperty("readmeScreenshots").orNull?.let { systemProperty("readme.screenshots", rootProject.file(it).path) }
     systemProperty("desktop.clip", rootProject.file("desktop/tests/data/jfk.m4a").path)
     maxHeapSize = "4g"
 }
