@@ -146,6 +146,9 @@ fun timelineColors(): TimelineColors {
 /** How big a photo is drawn: big while it's the moment playing, small while another is, in between when nothing plays. */
 enum class PhotoSize { FOCUSED, RESTING, COLLAPSED }
 
+/** [TimelinePane]'s jumpTo for the top: the header, with the session's summary. */
+const val TIMELINE_HEADER = "header"
+
 /** Where the indented notes start, past the paragraphs' time column. */
 private val NoteIndent = 50.dp
 
@@ -196,10 +199,9 @@ fun TimelinePane(
     var laidOut by remember { mutableStateOf(false) }
     // The header is item 0, so row i is item i + 1. [from] is how far down the list it should end up.
     suspend fun bringIntoView(key: String, from: Float = 0.28f) {
-        val i = rows.indexOfFirst { it.key == key }
-        if (i < 0) return
+        val item = if (key == TIMELINE_HEADER) 0 else rows.indexOfFirst { it.key == key }.takeIf { it >= 0 }?.plus(1) ?: return
         snapshotFlow { laidOut }.first { it }
-        listState.animateScrollToItem(i + 1, -(listState.layoutInfo.viewportSize.height * from).toInt())
+        listState.animateScrollToItem(item, if (item == 0) 0 else -(listState.layoutInfo.viewportSize.height * from).toInt())
     }
     LaunchedEffect(followKey, follow, peekId == null) {
         if (!follow || followKey == null || peekId != null) return@LaunchedEffect
@@ -226,7 +228,7 @@ fun TimelinePane(
         modifier = modifier.fillMaxWidth().background(colors.page).onGloballyPositioned { laidOut = true },
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp),
     ) {
-        item(key = "header") { Column { header() } }
+        item(key = TIMELINE_HEADER) { Column { header() } }
         itemsIndexed(rows, key = { _, row -> row.key }) { _, row ->
             when (row) {
                 is TimelineRow.RecordingStart -> Text(
@@ -288,7 +290,7 @@ fun TimelinePane(
                     onDelete = { SessionRepository.deleteNote(session.id, row.note.id) },
                 )
                 is TimelineRow.Fold -> FoldDivider(row, onClick = { onFold(row) })
-                is TimelineRow.Summary -> ChapterSummaryBlock(row.text)
+                is TimelineRow.Summary -> ChapterSummaryBlock(row.text, outlined = row.key == found)
             }
         }
         item(key = "footer") {
@@ -601,13 +603,15 @@ private fun MarkPill(
 
 /** A chapter's summary, under its slide (or where it starts): set apart from what was said and written. */
 @Composable
-private fun ChapterSummaryBlock(text: String) {
+private fun ChapterSummaryBlock(text: String, outlined: Boolean) {
+    val shape = RoundedCornerShape(12.dp)
     Row(
         Modifier
             .padding(top = 2.dp, bottom = 6.dp)
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(shape)
             .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f))
+            .then(if (outlined) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, shape) else Modifier)
             .padding(horizontal = 12.dp, vertical = 9.dp),
         verticalAlignment = Alignment.Top,
     ) {

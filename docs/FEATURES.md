@@ -92,9 +92,13 @@ in a background process of its own.
 
 ## Search
 
-- Find words across all notes, slide text and transcripts from the main screen, or within one session
-  with its 🔍 button.
-- Tapping a result takes you to it on the timeline, outlined for a moment, and plays from there.
+- Find words in session names, summaries (with their key points and action items), notes, slide text
+  and transcripts: across everything from the main screen, or within one session with its 🔍 button.
+- Filters under the search box narrow it to some kinds of result: sessions, summaries, notes, slides
+  or what was said. Each shows how many it found; with none picked, everything shows.
+- Tapping a result goes to it. From the main screen, a session's name opens the session, and anything
+  else opens its session and plays from that moment. Within a session, the timeline scrolls to it and
+  outlines it for a moment; a part's summary plays the part from its start.
 - A session's search is kept, so 🔍 brings its results back for trying the next match.
 
 ## Lock screen

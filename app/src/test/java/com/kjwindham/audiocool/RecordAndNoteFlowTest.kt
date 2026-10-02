@@ -38,12 +38,15 @@ import com.kjwindham.audiocool.audio.Dictation
 import com.kjwindham.audiocool.audio.PlayerController
 import com.kjwindham.audiocool.audio.RecorderController
 import com.kjwindham.audiocool.audio.RecordingService
+import com.kjwindham.audiocool.data.ChapterSummary
 import com.kjwindham.audiocool.data.Note
 import com.kjwindham.audiocool.data.Recording
 import com.kjwindham.audiocool.data.SessionRepository
+import com.kjwindham.audiocool.data.SessionSummary
 import com.kjwindham.audiocool.data.TimelineMode
 import com.kjwindham.audiocool.data.TranscriptSegment
 import com.kjwindham.audiocool.ocr.SlideText
+import com.kjwindham.audiocool.summarize.chapterKey
 import com.kjwindham.audiocool.ocr.TextLine
 import com.kjwindham.audiocool.transcribe.TranscriptionController
 import com.kjwindham.audiocool.transcribe.TranscriptionService
@@ -476,6 +479,100 @@ class RecordAndNoteFlowTest {
         compose.onNodeWithText("1 match").assertDoesNotExist()
         compose.onNodeWithContentDescription("Search this session").assertIsDisplayed()
         compose.onNodeWithText("Bio 102").assertIsDisplayed()
+    }
+
+    @Test
+    fun searchFindsSessionsByNameAndSummaryAndCanBeNarrowed() {
+        val chem = SessionRepository.create("Organic Chemistry: Lecture 7")
+        SessionRepository.addNote(chem.id, Note("c1", "Practice set due Friday", 1))
+        summarizedSession()
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Search").performClick()
+        compose.onNode(hasSetTextAction()).performTextInput("organic")
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("5 results").fetchSemanticsNodes().isNotEmpty() }
+        // The session named for it comes first, then the other session's summary, a part's summary, a note and what was said.
+        compose.onNodeWithText("Organic Chemistry: Lecture 7").assertIsDisplayed()
+        compose.onNodeWithText("How cells build organic molecules, and the enzymes that help.").assertIsDisplayed()
+        compose.onNodeWithText("Summaries · 2").assertIsDisplayed()
+
+        // Narrowed to notes, then back to everything.
+        compose.onNodeWithText("Notes · 1").performClick()
+        compose.onNodeWithText("1 result").assertIsDisplayed()
+        compose.onNodeWithText("organic = has carbon").assertIsDisplayed()
+        compose.onNodeWithText("Organic Chemistry: Lecture 7").assertDoesNotExist()
+        compose.onNodeWithText("Notes · 1").performClick()
+        compose.onNodeWithText("5 results").assertIsDisplayed()
+        // A filter with nothing in it says so, with a way back.
+        compose.onNodeWithText("Slides").performClick()
+        compose.onNodeWithText("No slides match “organic”.").assertIsDisplayed()
+        compose.onNodeWithText("Show everything").performClick()
+        compose.onNodeWithText("5 results").assertIsDisplayed()
+        screenshot("25-search-filters")
+
+        // The session's name opens it.
+        compose.onNodeWithText("Organic Chemistry: Lecture 7").performClick()
+        compose.onNodeWithText("Practice set due Friday").assertIsDisplayed()
+    }
+
+    @Test
+    fun aSummaryFoundInASessionsSearchOpensItsPart() {
+        summarizedSession()
+        compose.waitForIdle()
+        compose.onNodeWithText("Bio 102").performClick()
+        compose.onNodeWithContentDescription("Search this session").performClick()
+        compose.onAllNodes(hasSetTextAction())[0].performTextInput("organic")
+        compose.waitForIdle()
+        compose.onNodeWithText("4 matches").assertIsDisplayed()
+        // Its own filters, without sessions: it's in one.
+        compose.onNodeWithText("Summaries · 2").assertIsDisplayed()
+        compose.onNodeWithText("Sessions", substring = true).assertDoesNotExist()
+
+        // A part's summary: the timeline goes to it and plays the part from its start.
+        compose.onNodeWithText("Cells assemble large organic molecules from small building blocks.").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("4 matches").assertDoesNotExist()
+        compose.onNodeWithText("Cells assemble large organic molecules from small building blocks.").assertIsDisplayed()
+        assertEquals(29_700L, PlayerController.state.value.positionMs)
+        screenshot("26-search-took-you-to-a-part")
+
+        // The whole session's summary is at the top.
+        compose.onNodeWithContentDescription("Search this session").performClick()
+        compose.onNodeWithText("How cells build organic molecules, and the enzymes that help.").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("✦ Summary").assertIsDisplayed()
+    }
+
+    /** "Bio 102": two slides, each starting a part with its summary, a summary of the whole, a note and a transcript. */
+    private fun summarizedSession(): String {
+        val session = SessionRepository.create("Bio 102")
+        val audio = File(SessionRepository.sessionDir(session.id).apply { mkdirs() }, "recording-1.m4a").apply { writeBytes(ByteArray(16)) }
+        ShadowMediaPlayer.addMediaInfo(DataSource.toDataSource(audio.absolutePath), ShadowMediaPlayer.MediaInfo(300_000, 0))
+        SessionRepository.addRecording(session.id, Recording("r1", audio.name, 1_000_000, 300_000))
+        SessionRepository.setTranscript(
+            session.id, "r1",
+            listOf(
+                TranscriptSegment(2_000, 8_000, "Welcome back."),
+                TranscriptSegment(40_000, 50_000, "Cells build big molecules from small ones."),
+                TranscriptSegment(130_000, 140_000, "Enzymes speed up organic reactions in the cell."),
+            ),
+            "parakeet-unified-en-0.6b",
+        )
+        for ((id, at, text) in listOf(Triple("s1", 30_000L, "Building blocks"), Triple("s2", 120_000L, "Enzymes"))) {
+            val bitmap = Bitmap.createBitmap(160, 90, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.DKGRAY) }
+            val file = SessionRepository.photoFile(session.id, "photo-$id.jpg")
+            FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.JPEG, 80, it) }
+            SessionRepository.addNote(session.id, Note(id, "", 1_000_000 + at, "r1", at, photo = file.name))
+            SessionRepository.setPhotoText(session.id, id, text)
+        }
+        SessionRepository.addNote(session.id, Note("n1", "organic = has carbon", 1_045_000, "r1", 45_000))
+        val parts = setOf(chapterKey("r1", 30_000), chapterKey("r1", 120_000))
+        SessionRepository.setChapterSummary(session.id, ChapterSummary(chapterKey("r1", 30_000), "Cells assemble large organic molecules from small building blocks.", "", "test"), parts)
+        SessionRepository.setChapterSummary(session.id, ChapterSummary(chapterKey("r1", 120_000), "Enzymes lower the energy reactions need.", "", "test"), parts)
+        SessionRepository.setSessionSummary(
+            session.id,
+            SessionSummary("How cells build organic molecules, and the enzymes that help.", keyPoints = listOf("Enzymes speed up reactions."), basis = "", model = "test", createdAt = 0),
+        )
+        return session.id
     }
 
     @Test

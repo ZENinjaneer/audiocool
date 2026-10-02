@@ -41,7 +41,8 @@
   you jump there.
 - **Summaries.** A few sentences under each slide, and a summary of the whole session with key
   points and action items, written on the phone by Google's Gemma 4.
-- **Search everything.** Notes, slide text and every word said, across all your sessions.
+- **Search everything.** Session names, summaries, notes, slide text and every word said, across all
+  your sessions, with filters to narrow it down.
 - **Lock-screen controls.** Mark a moment, pause, stop or photograph a slide without unlocking.
 - **Spoken notes.** Hold the mic and say a note, through a headset if you like, while the phone
   keeps recording the room.
@@ -59,7 +60,7 @@
     <td align="center"><img src="docs/screenshots/preview.png" width="250" alt="A preview of a marked moment, quoting what was said"><br><sub>Tap a marker to preview it</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/screenshots/search.png" width="250" alt="Search results for caffeine across two sessions"><br><sub>Search notes, slides and what was said</sub></td>
+    <td align="center"><img src="docs/screenshots/search.png" width="250" alt="Search results for caffeine, with filters for sessions, summaries, notes and slides"><br><sub>Search everything, or pick what to search</sub></td>
     <td align="center"><img src="docs/screenshots/gallery.png" width="250" alt="Sessions as a gallery of thumbnails"><br><sub>Or browse them as a gallery</sub></td>
     <td align="center"><img src="docs/screenshots/dark.png" width="250" alt="The timeline in dark mode, playing"><br><sub>Dark mode</sub></td>
   </tr>

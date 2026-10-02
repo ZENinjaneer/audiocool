@@ -1,9 +1,11 @@
 package com.kjwindham.audiocool.search
 
 import com.kjwindham.audiocool.data.Session
+import com.kjwindham.audiocool.summarize.parseChapterKey
 import java.text.Normalizer
 
-enum class HitKind { NOTE, SPEECH, PHOTO }
+/** What a search found: a session's title, its summary or a chapter's, a note, the text on a photo, or something said. */
+enum class HitKind { TITLE, SUMMARY, NOTE, PHOTO, SPEECH }
 
 data class SearchHit(
     val sessionId: String,
@@ -17,13 +19,36 @@ data class SearchHit(
     val noteId: String? = null,
     /** Orders hits along the session's timeline, like its notes. */
     val timelineKey: Long = 0,
+    /** For a chapter's summary, the chapter (its key). */
+    val chapterKey: String? = null,
 )
 
-/** Notes, text on photos, and stretches of speech in [session] that contain every word of [query], in timeline order. */
+/**
+ * Everything in [session] that contains every word of [query]: its title and summary first, then its
+ * chapters' summaries, notes, text on photos and stretches of speech, in timeline order.
+ */
 fun searchSession(session: Session, query: String): List<SearchHit> {
     val terms = searchTerms(query)
     if (terms.isEmpty()) return emptyList()
     val hits = ArrayList<SearchHit>()
+    findTerms(session.title, terms)?.let { hits += SearchHit(session.id, HitKind.TITLE, session.title, it, timelineKey = Long.MIN_VALUE) }
+    // The summary's text, key points and action items, each on its own.
+    session.summary?.let { summary ->
+        for (piece in listOf(summary.text) + summary.keyPoints + summary.actionItems) {
+            val matches = findTerms(piece, terms) ?: continue
+            hits += SearchHit(session.id, HitKind.SUMMARY, piece, matches, timelineKey = Long.MIN_VALUE + 1)
+        }
+    }
+    // A chapter's summary, just ahead of what's in the chapter.
+    for (chapter in session.chapterSummaries) {
+        val matches = findTerms(chapter.text, terms) ?: continue
+        val (recId, startMs) = parseChapterKey(chapter.key) ?: continue
+        val rec = session.recording(recId) ?: continue
+        hits += SearchHit(
+            session.id, HitKind.SUMMARY, chapter.text, matches, rec.id, startMs,
+            timelineKey = rec.createdAt + startMs - 1, chapterKey = chapter.key,
+        )
+    }
     for (note in session.notes) {
         val matches = findTerms(note.text, terms) ?: continue
         val rec = session.recording(note.recId)

@@ -1,8 +1,10 @@
 package com.kjwindham.audiocool
 
+import com.kjwindham.audiocool.data.ChapterSummary
 import com.kjwindham.audiocool.data.Note
 import com.kjwindham.audiocool.data.Recording
 import com.kjwindham.audiocool.data.Session
+import com.kjwindham.audiocool.data.SessionSummary
 import com.kjwindham.audiocool.data.TranscriptSegment
 import com.kjwindham.audiocool.search.HitKind
 import com.kjwindham.audiocool.search.findTerms
@@ -10,6 +12,8 @@ import com.kjwindham.audiocool.search.fold
 import com.kjwindham.audiocool.search.searchAll
 import com.kjwindham.audiocool.search.searchSession
 import com.kjwindham.audiocool.search.searchTerms
+import com.kjwindham.audiocool.summarize.chapterKey
+import com.kjwindham.audiocool.summarize.parseChapterKey
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -47,6 +51,34 @@ class SearchTest {
         // Overlapping matches merge into one highlight; separate words stay separate.
         assertEquals(listOf(4..8), findTerms(text, searchTerms("krebs ebs")))
         assertEquals(listOf(4..8, 10..14), findTerms(text, searchTerms("cycle krebs")))
+    }
+
+    @Test
+    fun findsTheSessionByItsNameAndSummariesToo() {
+        val summarized = bio.copy(
+            title = "Bio 101: Cells",
+            summary = SessionSummary(
+                "How cells make energy.",
+                keyPoints = listOf("Mitochondria make the cell's energy."),
+                actionItems = listOf("Review the Krebs cycle."),
+                basis = "", model = "", createdAt = 0,
+            ),
+            chapterSummaries = listOf(ChapterSummary(chapterKey("r1", 8_000), "The Krebs cycle turns food into energy.", "", "")),
+        )
+        // Its name and its summary come first, then the chapter's summary just ahead of what was said in it.
+        val cells = searchSession(summarized, "cells")
+        assertEquals(listOf(HitKind.TITLE, HitKind.SUMMARY), cells.map { it.kind })
+        assertEquals(listOf(9..13), cells[0].matches)
+        val krebs = searchSession(summarized, "krebs")
+        assertEquals(listOf(HitKind.SUMMARY, HitKind.SUMMARY, HitKind.SPEECH), krebs.map { it.kind })
+        assertEquals("Review the Krebs cycle.", krebs[0].text)
+        assertNull(krebs[0].chapterKey)
+        // A chapter's summary leads to where the chapter starts.
+        assertEquals(chapterKey("r1", 8_000), krebs[1].chapterKey)
+        assertEquals("r1", krebs[1].recId)
+        assertEquals(8_000L, krebs[1].atMs)
+        assertEquals("r1" to 8_000L, parseChapterKey(chapterKey("r1", 8_000)))
+        assertNull(parseChapterKey("summary:x"))
     }
 
     @Test

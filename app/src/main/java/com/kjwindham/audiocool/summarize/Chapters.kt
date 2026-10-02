@@ -33,6 +33,13 @@ const val SECTION_WORDS = 900
 
 fun chapterKey(recId: String, startMs: Long) = "chapter:$recId:$startMs"
 
+/** The recording and start time a [chapterKey] names, or null if [key] isn't one. */
+fun parseChapterKey(key: String): Pair<String, Long>? {
+    val rest = key.removePrefix("chapter:").takeIf { it != key } ?: return null
+    val startMs = rest.substringAfterLast(':', "").toLongOrNull() ?: return null
+    return rest.substringBeforeLast(':') to startMs
+}
+
 /**
  * The session's chapters, in order. [settledUntil] says how much of a recording's transcript is final:
  * null when all of it is; while it's still being transcribed live, how far that's got (a chapter is

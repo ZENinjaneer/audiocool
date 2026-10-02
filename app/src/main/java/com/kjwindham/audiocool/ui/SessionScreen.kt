@@ -35,7 +35,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -484,9 +484,14 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
         keyboard?.hide()
         focusManager.clearFocus()
         searching = false
-        var key = foundRowKey(rows, hit.noteId, hit.recId, hit.atMs)
+        // The session's own summary is at the top.
+        if (hit.kind == HitKind.SUMMARY && hit.chapterKey == null) {
+            jumpTo = TIMELINE_HEADER
+            return
+        }
+        var key = foundRowKey(rows, hit.noteId, hit.recId, hit.atMs, hit.chapterKey)
         if (key == null) {
-            key = foundRowKey(timelineRows(session, TimelineMode.EVERYTHING), hit.noteId, hit.recId, hit.atMs)
+            key = foundRowKey(timelineRows(session, TimelineMode.EVERYTHING), hit.noteId, hit.recId, hit.atMs, hit.chapterKey)
             if (key != null) mode = TimelineMode.EVERYTHING
         }
         jumpTo = key
@@ -892,30 +897,34 @@ private fun SearchField(query: String, onQueryChange: (String) -> Unit, onClose:
     )
 }
 
-/** What in the session matches the search: notes, text on photos and things said, in timeline order. */
+/** The kinds of result a session's own search can be narrowed to. */
+private val SESSION_SEARCH_KINDS = listOf(HitKind.SUMMARY, HitKind.NOTE, HitKind.PHOTO, HitKind.SPEECH)
+
+/** What in the session matches the search: its summaries, notes, text on photos and things said, in timeline order. */
 @Composable
 private fun SessionSearch(session: Session, query: String, onOpen: (SearchHit) -> Unit, modifier: Modifier) {
-    val hits = remember(session, query) { searchSession(session, query) }
-    LazyColumn(modifier) {
-        when {
-            query.isBlank() -> item { Hint("Find notes, text on photos and what was said in this session.") }
-            hits.isEmpty() -> item { Hint("Nothing here matches “${query.trim()}”.") }
-            else -> {
-                item {
-                    Text(
-                        if (hits.size == 1) "1 match" else "${hits.size} matches",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp),
-                    )
-                }
-                items(hits, key = { hit ->
-                    when (hit.kind) {
-                        HitKind.NOTE -> "note:${hit.noteId}"
-                        HitKind.PHOTO -> "photo:${hit.noteId}"
-                        HitKind.SPEECH -> "said:${hit.recId}:${hit.atMs}"
+    // The session's own name isn't worth finding inside it.
+    val hits = remember(session, query) { searchSession(session, query).filter { it.kind != HitKind.TITLE } }
+    var picked by rememberSaveable(session.id, stateSaver = KindsSaver) { mutableStateOf(emptySet<HitKind>()) }
+    val shown = remember(hits, picked) { if (picked.isEmpty()) hits else hits.filter { it.kind in picked } }
+    Column(modifier) {
+        if (hits.isNotEmpty()) SearchFilters(hits, SESSION_SEARCH_KINDS, picked) { picked = picked.toggled(it) }
+        LazyColumn(Modifier.weight(1f)) {
+            when {
+                query.isBlank() -> item { Hint("Find summaries, notes, text on photos and what was said in this session.") }
+                hits.isEmpty() -> item { Hint("Nothing here matches “${query.trim()}”.") }
+                shown.isEmpty() -> item { NothingPicked(picked, query) { picked = emptySet() } }
+                else -> {
+                    item {
+                        Text(
+                            if (shown.size == 1) "1 match" else "${shown.size} matches",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp),
+                        )
                     }
-                }) { hit -> HitRow(session, hit, onOpen) }
+                    itemsIndexed(shown, key = { i, hit -> hitKey(hit, i) }) { _, hit -> HitRow(session, hit, onOpen) }
+                }
             }
         }
     }

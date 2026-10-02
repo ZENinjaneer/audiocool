@@ -173,10 +173,12 @@ fun timelineRows(session: Session, mode: TimelineMode): List<TimelineRow> {
 private fun Note.toRow(): TimelineRow = if (isMark) TimelineRow.Mark(this) else TimelineRow.Written(this)
 
 /**
- * Where something a search found sits in [rows]: a note's or photo's own row, or the paragraph with what
- * was said at [atMs] of [recId]. Null if [rows] leaves it out, as the notes-only view does what was said.
+ * Where something a search found sits in [rows]: a note's or photo's own row, a chapter's summary, or the
+ * paragraph with what was said at [atMs] of [recId]. Null if [rows] leaves it out, as the notes-only view
+ * does what was said.
  */
-fun foundRowKey(rows: List<TimelineRow>, noteId: String?, recId: String?, atMs: Long?): String? = when {
+fun foundRowKey(rows: List<TimelineRow>, noteId: String?, recId: String?, atMs: Long?, chapterKey: String? = null): String? = when {
+    chapterKey != null -> "summary:$chapterKey".takeIf { key -> rows.any { it.key == key } } ?: foundRowKey(rows, null, recId, atMs)
     noteId != null -> noteKey(noteId).takeIf { key -> rows.any { it.key == key } }
     recId != null && atMs != null -> rows.firstOrNull { it is TimelineRow.Speech && it.recId == recId && atMs in it.startMs..it.endMs }?.key
     else -> null

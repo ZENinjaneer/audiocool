@@ -5,6 +5,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +26,8 @@ import androidx.compose.foundation.lazy.grid.LazyGridItemSpanScope
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -45,6 +48,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -64,6 +68,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -73,6 +78,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -469,7 +476,11 @@ private fun SearchResults(
     onOpenHit: (SearchHit) -> Unit,
 ) {
     val byId = remember(sessions) { sessions.associateBy { it.id } }
-    val groups = remember(hits) { hits.groupBy { it.sessionId } }
+    var picked by rememberSaveable(stateSaver = KindsSaver) { mutableStateOf(emptySet<HitKind>()) }
+    val shown = remember(hits, picked) { if (picked.isEmpty()) hits else hits.filter { it.kind in picked } }
+    // Sessions whose names match come first, then what's in each session.
+    val titles = remember(shown) { shown.filter { it.kind == HitKind.TITLE } }
+    val groups = remember(shown) { shown.filter { it.kind != HitKind.TITLE }.groupBy { it.sessionId } }
     if (hits.isEmpty()) {
         if (!searched) return // still searching
         Box(modifier.padding(24.dp)) {
@@ -481,14 +492,23 @@ private fun SearchResults(
         }
         return
     }
-    LazyColumn(modifier, contentPadding = PaddingValues(bottom = 24.dp)) {
+    Column(modifier) {
+        SearchFilters(hits, HitKind.entries, picked) { picked = picked.toggled(it) }
+        if (shown.isEmpty()) {
+            NothingPicked(picked, query) { picked = emptySet() }
+            return@Column
+        }
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
         item(key = "count") {
             Text(
-                if (hits.size == 1) "1 result" else "${hits.size} results",
+                if (shown.size == 1) "1 result" else "${shown.size} results",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp),
             )
+        }
+        items(titles, key = { hitKey(it, 0) }) { hit ->
+            byId[hit.sessionId]?.let { TitleRow(it, hit, onOpenHit) }
         }
         groups.forEach { (sessionId, sessionHits) ->
             val session = byId[sessionId] ?: return@forEach
@@ -508,18 +528,98 @@ private fun SearchResults(
                     Text(session.title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                 }
             }
-            items(
-                sessionHits,
-                key = {
-                    when (it.kind) {
-                        HitKind.NOTE -> "note:${it.noteId}"
-                        HitKind.PHOTO -> "photo:${it.noteId}"
-                        HitKind.SPEECH -> "said:${it.recId}:${it.atMs}"
-                    }
-                },
-            ) { hit ->
+            itemsIndexed(sessionHits, key = { i, hit -> hitKey(hit, i) }) { _, hit ->
                 HitRow(session, hit, onOpenHit)
             }
+        }
+        }
+    }
+}
+
+/** What a search can be narrowed to, as its filters call it. */
+internal fun kindLabel(kind: HitKind) = when (kind) {
+    HitKind.TITLE -> "Sessions"
+    HitKind.SUMMARY -> "Summaries"
+    HitKind.NOTE -> "Notes"
+    HitKind.PHOTO -> "Slides"
+    HitKind.SPEECH -> "What was said"
+}
+
+internal fun Set<HitKind>.toggled(kind: HitKind) = if (kind in this) this - kind else this + kind
+
+/** Keeps the picked filters when Android recreates the screen. */
+internal val KindsSaver = Saver<Set<HitKind>, String>(
+    save = { kinds -> kinds.joinToString(",") { it.name } },
+    restore = { saved -> saved.split(',').filter { it.isNotEmpty() }.map { HitKind.valueOf(it) }.toSet() },
+)
+
+/** A key for [hit] in a list; [index] tells apart summary lines that happen to read the same. */
+internal fun hitKey(hit: SearchHit, index: Int) = when (hit.kind) {
+    HitKind.TITLE -> "title:${hit.sessionId}"
+    HitKind.SUMMARY -> "summary:${hit.sessionId}:${hit.chapterKey ?: "session"}:$index"
+    HitKind.NOTE -> "note:${hit.noteId}"
+    HitKind.PHOTO -> "photo:${hit.noteId}"
+    HitKind.SPEECH -> "said:${hit.recId}:${hit.atMs}"
+}
+
+/** Narrows a search to some kinds of result (none picked shows them all); each says how many it found. */
+@Composable
+internal fun SearchFilters(hits: List<SearchHit>, kinds: List<HitKind>, picked: Set<HitKind>, onToggle: (HitKind) -> Unit) {
+    val counts = remember(hits) { hits.groupingBy { it.kind }.eachCount() }
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        for (kind in kinds) {
+            val count = counts[kind] ?: 0
+            FilterChip(
+                selected = kind in picked,
+                onClick = { onToggle(kind) },
+                label = { Text(if (count > 0) "${kindLabel(kind)} · $count" else kindLabel(kind)) },
+            )
+        }
+    }
+}
+
+/** The filters leave nothing: say so, with a way back to everything. */
+@Composable
+internal fun NothingPicked(picked: Set<HitKind>, query: String, onClear: () -> Unit) {
+    Column(Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
+        Text(
+            "No ${picked.joinToString(" or ") { kindLabel(it).lowercase() }} match “${query.trim()}”.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        TextButton(onClick = onClear) { Text("Show everything") }
+    }
+}
+
+/** A session whose name matches: its thumbnail, the name with the words lit up, and when it was. */
+@Composable
+private fun TitleRow(session: Session, hit: SearchHit, onOpenHit: (SearchHit) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable { onOpenHit(hit) }.padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val photo = session.thumbnailNote()?.photo
+        if (photo != null) {
+            PhotoThumbnail(
+                SessionRepository.photoFile(session.id, photo),
+                sizePx = 240,
+                modifier = Modifier.size(width = 64.dp, height = 48.dp).clip(RoundedCornerShape(6.dp)),
+            )
+        } else {
+            Box(
+                Modifier.size(width = 64.dp, height = 48.dp).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.secondaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(AppIcons.Mic, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(highlighted(hit.text, hit.matches), style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(summary(session), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -531,20 +631,29 @@ internal fun HitRow(session: Session, hit: SearchHit, onOpenHit: (SearchHit) -> 
         Modifier.fillMaxWidth().clickable { onOpenHit(hit) }.padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        Icon(
-            when (hit.kind) {
-                HitKind.SPEECH -> AppIcons.Mic
-                HitKind.PHOTO -> AppIcons.Image
-                HitKind.NOTE -> Icons.Filled.Edit
-            },
-            contentDescription = when (hit.kind) {
-                HitKind.SPEECH -> "Said"
-                HitKind.PHOTO -> "On a photo"
-                HitKind.NOTE -> "Note"
-            },
-            modifier = Modifier.padding(top = 2.dp).size(18.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (hit.kind == HitKind.SUMMARY || hit.kind == HitKind.TITLE) {
+            Text(
+                "✦",
+                color = MaterialTheme.colorScheme.secondary,
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.width(18.dp).semantics { contentDescription = "Summary" },
+            )
+        } else {
+            Icon(
+                when (hit.kind) {
+                    HitKind.SPEECH -> AppIcons.Mic
+                    HitKind.PHOTO -> AppIcons.Image
+                    else -> Icons.Filled.Edit
+                },
+                contentDescription = when (hit.kind) {
+                    HitKind.SPEECH -> "Said"
+                    HitKind.PHOTO -> "On a photo"
+                    else -> "Note"
+                },
+                modifier = Modifier.padding(top = 2.dp).size(18.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             if (label != null) {
