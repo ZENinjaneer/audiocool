@@ -19,6 +19,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.hasAnyAncestor
@@ -40,6 +41,7 @@ import com.kjwindham.audiocool.audio.RecordingService
 import com.kjwindham.audiocool.data.Note
 import com.kjwindham.audiocool.data.Recording
 import com.kjwindham.audiocool.data.SessionRepository
+import com.kjwindham.audiocool.data.TimelineMode
 import com.kjwindham.audiocool.data.TranscriptSegment
 import com.kjwindham.audiocool.ocr.SlideText
 import com.kjwindham.audiocool.ocr.TextLine
@@ -419,6 +421,61 @@ class RecordAndNoteFlowTest {
         compose.onNodeWithText("Mitochondria are the powerhouse of the cell.").performClick()
         compose.waitForIdle()
         assertEquals(1_700L, PlayerController.state.value.positionMs)
+    }
+
+    @Test
+    fun aResultOfTheSessionsSearchTakesYouToItsPlaceInTheTimeline() {
+        // A long talk with notes throughout, so what's found is well down the timeline, seen notes-only.
+        val session = SessionRepository.create("Bio 102")
+        val file = File(SessionRepository.sessionDir(session.id).apply { mkdirs() }, "recording-1.m4a").apply { writeBytes(ByteArray(16)) }
+        SessionRepository.addRecording(session.id, Recording("r1", file.name, 1_000L, 1_300_000))
+        val said = (0 until 40).map { i -> TranscriptSegment(i * 30_000L + 1_000, i * 30_000L + 5_000, "Part $i of the talk, about cells.") } +
+            TranscriptSegment(1_230_000, 1_234_000, "The Krebs cycle happens in the matrix.")
+        SessionRepository.setTranscript(session.id, "r1", said)
+        repeat(30) { i -> SessionRepository.addNote(session.id, Note("p$i", "Point $i", 1_000L + i, "r1", i * 30_000L + 3_000)) }
+        SessionRepository.addNote(session.id, Note("n1", "Krebs = energy", 1_200_000, "r1", 1_210_000))
+        ShadowMediaPlayer.addMediaInfo(DataSource.toDataSource(file.absolutePath), ShadowMediaPlayer.MediaInfo(1_300_000, 0))
+        Prefs(app).timelineMode = TimelineMode.NOTES.name
+        compose.waitForIdle()
+        compose.onNodeWithText("Bio 102").performClick()
+        compose.onNodeWithContentDescription("Search this session").performClick()
+        compose.onAllNodes(hasSetTextAction())[0].performTextInput("krebs")
+        compose.waitForIdle()
+        compose.onNodeWithText("2 matches").assertIsDisplayed()
+
+        // A note: search closes and the keyboard with it; the timeline is at the note, playing from just before it.
+        compose.onNodeWithText("Krebs = energy").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("2 matches").assertDoesNotExist()
+        compose.onAllNodes(isFocused()).assertCountEquals(0)
+        compose.onNodeWithText("Krebs = energy").assertIsDisplayed()
+        assertTrue(PlayerController.state.value.isPlaying)
+        assertEquals(1_207_000L, PlayerController.state.value.positionMs)
+        screenshot("23-search-took-you-to-the-note")
+
+        // The search is kept, for trying the next match.
+        compose.onNodeWithContentDescription("Search this session").performClick()
+        compose.onNodeWithText("2 matches").assertIsDisplayed()
+        // Something said, which notes-only leaves out: the full view opens there, playing it.
+        compose.onNodeWithText("The Krebs cycle happens in the matrix.").performClick()
+        compose.waitForIdle()
+        compose.onNode(hasText("The Krebs cycle happens in the matrix.") and isSelected()).assertIsDisplayed()
+        assertEquals(1_229_700L, PlayerController.state.value.positionMs)
+        compose.onNodeWithText("Everything").assertIsSelected()
+        // Only for now: the view you picked is still the one sessions open on.
+        assertEquals(TimelineMode.NOTES.name, Prefs(app).timelineMode)
+        screenshot("24-search-took-you-to-what-was-said")
+
+        // Back in search, typing replaces the kept search, and Back closes search rather than the session.
+        compose.onNodeWithContentDescription("Search this session").performClick()
+        compose.onAllNodes(hasSetTextAction())[0].performTextInput("matrix")
+        compose.waitForIdle()
+        compose.onNodeWithText("1 match").assertIsDisplayed()
+        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.waitForIdle()
+        compose.onNodeWithText("1 match").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Search this session").assertIsDisplayed()
+        compose.onNodeWithText("Bio 102").assertIsDisplayed()
     }
 
     @Test

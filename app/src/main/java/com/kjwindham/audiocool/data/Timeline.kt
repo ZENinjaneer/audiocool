@@ -172,6 +172,16 @@ fun timelineRows(session: Session, mode: TimelineMode): List<TimelineRow> {
 
 private fun Note.toRow(): TimelineRow = if (isMark) TimelineRow.Mark(this) else TimelineRow.Written(this)
 
+/**
+ * Where something a search found sits in [rows]: a note's or photo's own row, or the paragraph with what
+ * was said at [atMs] of [recId]. Null if [rows] leaves it out, as the notes-only view does what was said.
+ */
+fun foundRowKey(rows: List<TimelineRow>, noteId: String?, recId: String?, atMs: Long?): String? = when {
+    noteId != null -> noteKey(noteId).takeIf { key -> rows.any { it.key == key } }
+    recId != null && atMs != null -> rows.firstOrNull { it is TimelineRow.Speech && it.recId == recId && atMs in it.startMs..it.endMs }?.key
+    else -> null
+}
+
 /** The paragraph playing at [positionMs] of [recId]: the last one that's started (a moment early, as a tap starts just before it). */
 fun playingSpeechKey(rows: List<TimelineRow>, recId: String?, positionMs: Long): String? =
     rows.lastOrNull { it is TimelineRow.Speech && it.recId == recId && it.startMs <= positionMs + 400 }?.key

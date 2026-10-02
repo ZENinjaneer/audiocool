@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -57,6 +58,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,6 +69,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -83,6 +86,7 @@ import com.kjwindham.audiocool.data.TimelineRow
 import com.kjwindham.audiocool.data.noteKey
 import com.kjwindham.audiocool.util.noteLabel
 import com.kjwindham.audiocool.util.timeLabel
+import kotlinx.coroutines.flow.first
 
 /** The colours of each kind of thing on a timeline. Fixed rather than from the theme, so a kind always looks the same. */
 @Immutable
@@ -149,7 +153,9 @@ private val NoteIndent = 50.dp
  * The session's timeline. [playingKey] is the paragraph playing and [focusId] the note, photo or
  * mark playback last passed; while [follow] is on, [followKey] is kept in view. [peekId] is a note
  * being previewed from the scrubber: it's brought into view and outlined. [jumpTo] brings a row
- * into view once. While recording ([canPlay] off), tapping a photo shows it rather than playing from it.
+ * into view once, and [found] is a row a search just went to, outlined for a moment. The screen keeps
+ * [listState], so the timeline is where it was after search closes. While recording ([canPlay] off),
+ * tapping a photo shows it rather than playing from it.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -159,6 +165,7 @@ fun TimelinePane(
     playingKey: String?,
     focusId: String?,
     peekId: String?,
+    found: String?,
     followKey: String?,
     follow: Boolean,
     engaged: Boolean,
@@ -174,9 +181,9 @@ fun TimelinePane(
     onEdit: (Note) -> Unit,
     onFold: (TimelineRow.Fold) -> Unit,
     modifier: Modifier = Modifier,
+    listState: LazyListState = rememberLazyListState(),
 ) {
     val colors = timelineColors()
-    val listState = rememberLazyListState()
     val thumbnailId = session.thumbnailNote()?.id
     val focusNote = focusId?.let { id -> session.notes.firstOrNull { it.id == id } }
     // Your own scrolling wins over following playback for a few seconds.
@@ -185,10 +192,13 @@ fun TimelinePane(
         listState.interactionSource.interactions.collect { if (it is DragInteraction.Start) lastTouched = SystemClock.uptimeMillis() }
     }
 
+    // Scrolling waits for the list's first layout, as when it reappears after a search.
+    var laidOut by remember { mutableStateOf(false) }
     // The header is item 0, so row i is item i + 1. [from] is how far down the list it should end up.
     suspend fun bringIntoView(key: String, from: Float = 0.28f) {
         val i = rows.indexOfFirst { it.key == key }
         if (i < 0) return
+        snapshotFlow { laidOut }.first { it }
         listState.animateScrollToItem(i + 1, -(listState.layoutInfo.viewportSize.height * from).toInt())
     }
     LaunchedEffect(followKey, follow, peekId == null) {
@@ -213,7 +223,7 @@ fun TimelinePane(
 
     LazyColumn(
         state = listState,
-        modifier = modifier.fillMaxWidth().background(colors.page),
+        modifier = modifier.fillMaxWidth().background(colors.page).onGloballyPositioned { laidOut = true },
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp),
     ) {
         item(key = "header") { Column { header() } }
@@ -232,6 +242,7 @@ fun TimelinePane(
                         label = timeLabel(session, row.recId, row.startMs).orEmpty(),
                         row = row,
                         playing = row.key == playingKey,
+                        outlined = row.key == found,
                         tint = tintNote?.let { colors.of(it).tint },
                         dot = dotNote?.let { colors.of(it).dot },
                         colors = colors,
@@ -247,7 +258,7 @@ fun TimelinePane(
                         else -> PhotoSize.RESTING
                     },
                     isThumbnail = row.note.id == thumbnailId,
-                    peeked = row.note.id == peekId,
+                    peeked = row.note.id == peekId || row.key == found,
                     colors = colors,
                     onClick = {
                         // The first tap plays from it (and so opens it up); once it's open, a tap shows it full screen.
@@ -260,7 +271,7 @@ fun TimelinePane(
                     label = noteLabel(session, row.note),
                     note = row.note,
                     focused = row.note.id == focusId,
-                    peeked = row.note.id == peekId,
+                    peeked = row.note.id == peekId || row.key == found,
                     kind = colors.of(row.note),
                     onClick = { if (row.note.offsetMs != null && session.recording(row.note.recId) != null) onPlayNote(row.note) else onEdit(row.note) },
                     onEdit = { onEdit(row.note) },
@@ -270,7 +281,7 @@ fun TimelinePane(
                     label = noteLabel(session, row.note),
                     note = row.note,
                     focused = row.note.id == focusId,
-                    peeked = row.note.id == peekId,
+                    peeked = row.note.id == peekId || row.key == found,
                     kind = colors.mark,
                     onClick = { onPlayNote(row.note) },
                     onEdit = { onEdit(row.note) },
@@ -293,6 +304,7 @@ private fun SpeechParagraph(
     label: String,
     row: TimelineRow.Speech,
     playing: Boolean,
+    outlined: Boolean,
     tint: Color?,
     dot: Color?,
     colors: TimelineColors,
@@ -310,6 +322,7 @@ private fun SpeechParagraph(
                 .shadow(if (playing && tint == null) 2.dp else 0.dp, shape, clip = false)
                 .clip(shape)
                 .background(background)
+                .then(if (outlined) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, shape) else Modifier)
                 .semantics { selected = playing }
                 .combinedClickable(onClick = onClick, onLongClick = { menu = true })
                 .padding(horizontal = 10.dp, vertical = 9.dp),

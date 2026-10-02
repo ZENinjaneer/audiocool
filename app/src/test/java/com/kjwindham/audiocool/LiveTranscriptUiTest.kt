@@ -59,6 +59,7 @@ class LiveTranscriptUiTest {
                     playingKey = null,
                     focusId = null,
                     peekId = null,
+                    found = null,
                     followKey = null,
                     follow = false,
                     engaged = false,

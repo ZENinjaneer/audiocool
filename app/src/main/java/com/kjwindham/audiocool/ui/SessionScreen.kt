@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -33,6 +34,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -87,12 +89,16 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -112,6 +118,7 @@ import com.kjwindham.audiocool.data.Session
 import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.data.TimelineMode
 import com.kjwindham.audiocool.data.TimelineRow
+import com.kjwindham.audiocool.data.foundRowKey
 import com.kjwindham.audiocool.data.highlightedNoteId
 import com.kjwindham.audiocool.data.newId
 import com.kjwindham.audiocool.data.noteKey
@@ -206,6 +213,12 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
     var peekId by remember { mutableStateOf<String?>(null) }
     var scrubMs by remember { mutableStateOf<Long?>(null) }
     var jumpTo by remember { mutableStateOf<String?>(null) }
+    // A row a search result took you to, outlined for a moment.
+    var found by remember { mutableStateOf<String?>(null) }
+    // Kept here rather than in the timeline, so opening and closing search doesn't lose your place.
+    val timelineList = rememberSaveable(session.id, saver = LazyListState.Saver) { LazyListState() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
 
     LaunchedEffect(rec.error) {
         rec.error?.let {
@@ -234,6 +247,18 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
             delay(8_000)
             peekId = null
         }
+    }
+    // As does the outline on what a search found.
+    LaunchedEffect(found) {
+        if (found != null) {
+            delay(4_000)
+            found = null
+        }
+    }
+    // Back closes search before it leaves the session.
+    BackHandler(enabled = searching) {
+        searching = false
+        query = ""
     }
 
     fun toast(message: String) {
@@ -448,6 +473,31 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
         if (newestId != null && newestId != seenNewest) jumpTo = noteKey(newestId)
         seenNewest = newestId
     }
+
+    /**
+     * Goes to what a search found: search closes, and the keyboard with it; the timeline scrolls to it
+     * and outlines it for a moment; and it plays from there, as tapping it in the timeline does (not
+     * while recording). Something said that the picked view leaves out opens the full view. The search
+     * is kept, so 🔍 brings its results back, for trying the next match.
+     */
+    fun openHit(hit: SearchHit) {
+        keyboard?.hide()
+        focusManager.clearFocus()
+        searching = false
+        var key = foundRowKey(rows, hit.noteId, hit.recId, hit.atMs)
+        if (key == null) {
+            key = foundRowKey(timelineRows(session, TimelineMode.EVERYTHING), hit.noteId, hit.recId, hit.atMs)
+            if (key != null) mode = TimelineMode.EVERYTHING
+        }
+        jumpTo = key
+        found = key
+        if (rec.status != RecorderController.Status.IDLE) return
+        val note = hit.noteId?.let { id -> session.notes.firstOrNull { it.id == id } }
+        when {
+            note != null -> if (note.offsetMs != null && session.recording(note.recId) != null) playNote(note)
+            hit.atMs != null -> playFrom(hit.recId, hit.atMs)
+        }
+    }
     val imeVisible = WindowInsets.isImeVisible
     // Kept between playback ticks, so the scrubber's markers aren't rebuilt ten times a second.
     val markers = remember(session.notes, selected?.id) { session.notes.filter { it.recId == selected?.id && it.offsetMs != null } }
@@ -558,15 +608,7 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
                     SessionSearch(
                         session = session,
                         query = query,
-                        onOpen = { hit ->
-                            val note = hit.noteId?.let { id -> session.notes.firstOrNull { it.id == id } }
-                            when {
-                                note != null && note.offsetMs != null && session.recording(note.recId) != null -> playNote(note)
-                                note?.photo != null -> viewing = note.id
-                                note != null -> editing = note
-                                hit.atMs != null -> playFrom(hit.recId, hit.atMs)
-                            }
-                        },
+                        onOpen = ::openHit,
                         modifier = Modifier.fillMaxSize(),
                     )
                 } else {
@@ -576,6 +618,7 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
                         playingKey = playingKey,
                         focusId = focusId,
                         peekId = peekId,
+                        found = found,
                         followKey = followKey,
                         follow = follow,
                         engaged = position != null,
@@ -611,6 +654,7 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
                             jumpTo = it.firstKey
                         },
                         modifier = Modifier.fillMaxSize(),
+                        listState = timelineList,
                     )
                 }
                 val peekNote = peekId?.let { id -> session.notes.firstOrNull { it.id == id } }
@@ -830,10 +874,15 @@ private fun ModeSwitch(mode: TimelineMode, onPick: (TimelineMode) -> Unit) {
 @Composable
 private fun SearchField(query: String, onQueryChange: (String) -> Unit, onClose: () -> Unit) {
     val focus = remember { FocusRequester() }
+    // Back to a search from before: it's selected, so typing starts a new one.
+    var value by remember { mutableStateOf(TextFieldValue(query, TextRange(0, query.length))) }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     OutlinedTextField(
-        value = query,
-        onValueChange = onQueryChange,
+        value = value,
+        onValueChange = {
+            value = it
+            onQueryChange(it.text)
+        },
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).focusRequester(focus),
         placeholder = { Text("Search notes, slides and what was said") },
         leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
