@@ -16,6 +16,11 @@ class Prefs(context: Context) {
         get() = sp.getString("timeline_mode", "EVERYTHING").orEmpty()
         set(value) = sp.edit { putString("timeline_mode", value) }
 
+    /** The folder the main screen shows; empty for all sessions. */
+    var shownFolder: String
+        get() = sp.getString("shown_folder", "").orEmpty()
+        set(value) = sp.edit { putString("shown_folder", value) }
+
     /** The app crashed and the log hasn't been shared since: offer to. */
     var unreportedCrash: Boolean
         get() = sp.getBoolean("unreported_crash", false)

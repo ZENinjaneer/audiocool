@@ -51,6 +51,7 @@ import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.InputChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -86,11 +87,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kjwindham.audiocool.audio.RecorderController
+import com.kjwindham.audiocool.data.FolderRepository
+import com.kjwindham.audiocool.data.FolderSummary
 import com.kjwindham.audiocool.data.Session
 import com.kjwindham.audiocool.data.SessionRepository
+import com.kjwindham.audiocool.data.folderSummaries
 import com.kjwindham.audiocool.search.HitKind
 import com.kjwindham.audiocool.search.SearchHit
 import com.kjwindham.audiocool.search.searchAll
+import com.kjwindham.audiocool.search.searchFolders
 import com.kjwindham.audiocool.transcribe.SpeechModel
 import com.kjwindham.audiocool.transcribe.TranscriptionController
 import com.kjwindham.audiocool.util.AppLog
@@ -112,7 +117,7 @@ fun SessionListScreen(
     onQueryChange: (String) -> Unit,
     onOpen: (String) -> Unit,
     onOpenHit: (SearchHit) -> Unit,
-    onCreate: () -> Unit,
+    onCreate: (folder: String?) -> Unit,
 ) {
     val rec by RecorderController.state.collectAsStateWithLifecycle()
     val transcription by TranscriptionController.state.collectAsStateWithLifecycle()
@@ -136,6 +141,24 @@ fun SessionListScreen(
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val sorted = remember(sessions) { sessions.sortedByDescending { it.updatedAt } }
+    val folderList by FolderRepository.folders.collectAsStateWithLifecycle()
+    val folders = remember(sessions, folderList) { folderSummaries(sessions, folderList) }
+    var shownName by remember { mutableStateOf(prefs.shownFolder.takeIf { it.isNotEmpty() }) }
+    // The folder shown, as long as it exists.
+    val shown = folders.firstOrNull { it.name == shownName }
+    val visible = remember(sorted, shown) { if (shown == null) sorted else sorted.filter { it.folder == shown.name } }
+    var moving by remember { mutableStateOf<Session?>(null) }
+    var creatingFolder by remember { mutableStateOf(false) }
+    var renamingFolder by remember { mutableStateOf<String?>(null) }
+    var deletingFolder by remember { mutableStateOf<FolderSummary?>(null) }
+    // A search started in a folder keeps to it until widened.
+    var widened by remember { mutableStateOf(false) }
+    val searchFolder = if (widened) null else shown?.name
+
+    fun show(name: String?) {
+        shownName = name
+        prefs.shownFolder = name.orEmpty()
+    }
     val untranscribed = sessions.sumOf { s ->
         s.recordings.count { it.durationMs > 0 && it.transcript == null && !transcription.isPending(s.id, it.id) }
     }
@@ -143,19 +166,23 @@ fun SessionListScreen(
     var hits by remember { mutableStateOf<List<SearchHit>>(emptyList()) }
     // The query [hits] are for; until a new search finishes, the previous results stay up.
     var hitsFor by remember { mutableStateOf("") }
-    LaunchedEffect(query, sessions) {
+    LaunchedEffect(query, sessions, searchFolder, folders) {
         if (query.isBlank()) {
             hits = emptyList()
             hitsFor = ""
             return@LaunchedEffect
         }
         delay(150) // wait for a pause in typing
-        hits = withContext(Dispatchers.Default) { searchAll(sessions, query) }
+        hits = withContext(Dispatchers.Default) {
+            if (searchFolder == null) searchFolders(folders, query) + searchAll(sessions, query)
+            else searchAll(sessions.filter { it.folder == searchFolder }, query)
+        }
         hitsFor = query
     }
 
     fun closeSearch() {
         searching = false
+        widened = false
         onQueryChange("")
     }
 
@@ -218,6 +245,13 @@ fun SessionListScreen(
                                     },
                                 )
                                 DropdownMenuItem(
+                                    text = { Text("New folder") },
+                                    onClick = {
+                                        showMenu = false
+                                        creatingFolder = true
+                                    },
+                                )
+                                DropdownMenuItem(
                                     text = { Text("Desktop transcription") },
                                     onClick = {
                                         showMenu = false
@@ -268,7 +302,8 @@ fun SessionListScreen(
         floatingActionButton = {
             if (!searching) {
                 ExtendedFloatingActionButton(
-                    onClick = onCreate,
+                    // Made in the folder shown.
+                    onClick = { onCreate(shown?.name) },
                     // Material3 hides the FAB's text from accessibility, so the icon carries the label.
                     icon = { Icon(Icons.Filled.Add, contentDescription = "New session") },
                     text = { Text("New session") },
@@ -278,14 +313,29 @@ fun SessionListScreen(
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         if (searching && query.isNotBlank()) {
-            SearchResults(hits, searched = hitsFor == query, sessions, query, Modifier.fillMaxSize().padding(padding), onOpenHit)
+            SearchResults(
+                hits, searched = hitsFor == query, sessions, query, Modifier.fillMaxSize().padding(padding), onOpenHit,
+                folders = folders,
+                inFolder = searchFolder,
+                onWiden = { widened = true },
+                onOpenFolder = { name ->
+                    closeSearch()
+                    show(name)
+                },
+            )
             return@Scaffold
         }
         // One grid for both views: a single column of cards, or tiles with the title under the thumbnail.
         val wide: LazyGridItemSpanScope.() -> GridItemSpan = { GridItemSpan(maxLineSpan) }
+        Column(Modifier.fillMaxSize().padding(padding)) {
+        // Folders, once there are any.
+        if (folders.isNotEmpty() && !searching) {
+            FolderChips(folders, shown?.name, onShow = ::show, onNew = { creatingFolder = true })
+            shown?.let { f -> FolderBar(f, onRename = { renamingFolder = f.name }, onDelete = { deletingFolder = f }) }
+        }
         LazyVerticalGrid(
             columns = if (galleryView) GridCells.Adaptive(minSize = 150.dp) else GridCells.Fixed(1),
-            modifier = Modifier.fillMaxSize().padding(padding),
+            modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(if (galleryView) 12.dp else 8.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -326,17 +376,82 @@ fun SessionListScreen(
                     )
                 }
             }
-            if (sorted.isEmpty()) {
-                item(key = "empty", span = wide) { EmptyState() }
+            if (visible.isEmpty()) {
+                item(key = "empty", span = wide) {
+                    if (shown == null) {
+                        EmptyState()
+                    } else {
+                        Text(
+                            "Nothing in “${shown.name}” yet. Sessions you start here go in it, and any session can be moved here from its menu.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 24.dp, horizontal = 8.dp),
+                        )
+                    }
+                }
             }
-            items(sorted, key = { it.id }) { s ->
+            items(visible, key = { it.id }) { s ->
+                // In the folder view, every session is in that folder; in All, say which.
+                val folderLine = shown == null
                 if (galleryView) {
-                    SessionTile(s, onClick = { onOpen(s.id) }, onRename = { renaming = s }, onDelete = { deleting = s })
+                    SessionTile(s, onClick = { onOpen(s.id) }, onRename = { renaming = s }, onMove = { moving = s }, onDelete = { deleting = s })
                 } else {
-                    SessionCard(s, onClick = { onOpen(s.id) }, onRename = { renaming = s }, onDelete = { deleting = s })
+                    SessionCard(s, folderLine, onClick = { onOpen(s.id) }, onRename = { renaming = s }, onMove = { moving = s }, onDelete = { deleting = s })
                 }
             }
         }
+        }
+    }
+
+    moving?.let { s ->
+        MoveToFolderDialog(
+            current = s.folder,
+            folders = folders.map { it.name },
+            onMove = { folder ->
+                SessionRepository.moveToFolder(s.id, folder)
+                moving = null
+            },
+            onDismiss = { moving = null },
+        )
+    }
+    if (creatingFolder) {
+        TextInputDialog(
+            title = "New folder",
+            initial = "",
+            onConfirm = {
+                show(FolderRepository.create(it))
+                creatingFolder = false
+            },
+            onDismiss = { creatingFolder = false },
+        )
+    }
+    renamingFolder?.let { name ->
+        TextInputDialog(
+            title = "Rename folder",
+            initial = name,
+            onConfirm = {
+                show(FolderRepository.rename(name, it))
+                renamingFolder = null
+            },
+            onDismiss = { renamingFolder = null },
+        )
+    }
+    deletingFolder?.let { f ->
+        ConfirmDialog(
+            title = "Delete “${f.name}”?",
+            message = when (f.sessions) {
+                0 -> "The folder is empty."
+                1 -> "Its session stays, outside any folder."
+                else -> "Its ${f.sessions} sessions stay, outside any folder."
+            },
+            confirmLabel = "Delete",
+            onConfirm = {
+                FolderRepository.delete(f.name)
+                show(null)
+                deletingFolder = null
+            },
+            onDismiss = { deletingFolder = null },
+        )
     }
 
     renaming?.let { s ->
@@ -474,26 +589,33 @@ private fun SearchResults(
     query: String,
     modifier: Modifier,
     onOpenHit: (SearchHit) -> Unit,
+    folders: List<FolderSummary> = emptyList(),
+    inFolder: String? = null,
+    onWiden: () -> Unit = {},
+    onOpenFolder: (String) -> Unit = {},
 ) {
     val byId = remember(sessions) { sessions.associateBy { it.id } }
     var picked by rememberSaveable(stateSaver = KindsSaver) { mutableStateOf(emptySet<HitKind>()) }
     val shown = remember(hits, picked) { if (picked.isEmpty()) hits else hits.filter { it.kind in picked } }
-    // Sessions whose names match come first, then what's in each session.
+    // Folders and sessions whose names match come first, then what's in each session.
+    val folderHits = remember(shown) { shown.filter { it.kind == HitKind.FOLDER } }
     val titles = remember(shown) { shown.filter { it.kind == HitKind.TITLE } }
-    val groups = remember(shown) { shown.filter { it.kind != HitKind.TITLE }.groupBy { it.sessionId } }
+    val groups = remember(shown) { shown.filter { it.kind != HitKind.TITLE && it.kind != HitKind.FOLDER }.groupBy { it.sessionId } }
     if (hits.isEmpty()) {
         if (!searched) return // still searching
-        Box(modifier.padding(24.dp)) {
+        Column(modifier.padding(24.dp)) {
             Text(
-                "Nothing matches “${query.trim()}”.",
+                if (inFolder != null) "Nothing in “$inFolder” matches “${query.trim()}”." else "Nothing matches “${query.trim()}”.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (inFolder != null) TextButton(onClick = onWiden) { Text("Search all sessions") }
         }
         return
     }
+    val kinds = if (folders.isNotEmpty() && inFolder == null) HitKind.entries else HitKind.entries - HitKind.FOLDER
     Column(modifier) {
-        SearchFilters(hits, HitKind.entries, picked) { picked = picked.toggled(it) }
+        SearchFilters(hits, kinds, picked, inFolder, onWiden) { picked = picked.toggled(it) }
         if (shown.isEmpty()) {
             NothingPicked(picked, query) { picked = emptySet() }
             return@Column
@@ -506,6 +628,9 @@ private fun SearchResults(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp),
             )
+        }
+        items(folderHits, key = { hitKey(it, 0) }) { hit ->
+            FolderRow(hit, folders.firstOrNull { it.name == hit.folder }, onOpenFolder)
         }
         items(titles, key = { hitKey(it, 0) }) { hit ->
             byId[hit.sessionId]?.let { TitleRow(it, hit, onOpenHit) }
@@ -538,6 +663,7 @@ private fun SearchResults(
 
 /** What a search can be narrowed to, as its filters call it. */
 internal fun kindLabel(kind: HitKind) = when (kind) {
+    HitKind.FOLDER -> "Folders"
     HitKind.TITLE -> "Sessions"
     HitKind.SUMMARY -> "Summaries"
     HitKind.NOTE -> "Notes"
@@ -555,6 +681,7 @@ internal val KindsSaver = Saver<Set<HitKind>, String>(
 
 /** A key for [hit] in a list; [index] tells apart summary lines that happen to read the same. */
 internal fun hitKey(hit: SearchHit, index: Int) = when (hit.kind) {
+    HitKind.FOLDER -> "folder:${hit.folder}"
     HitKind.TITLE -> "title:${hit.sessionId}"
     HitKind.SUMMARY -> "summary:${hit.sessionId}:${hit.chapterKey ?: "session"}:$index"
     HitKind.NOTE -> "note:${hit.noteId}"
@@ -562,14 +689,32 @@ internal fun hitKey(hit: SearchHit, index: Int) = when (hit.kind) {
     HitKind.SPEECH -> "said:${hit.recId}:${hit.atMs}"
 }
 
-/** Narrows a search to some kinds of result (none picked shows them all); each says how many it found. */
+/**
+ * Narrows a search to some kinds of result (none picked shows them all); each says how many it found.
+ * A search kept to a folder ([inFolder]) says so first, with a way to search everything instead.
+ */
 @Composable
-internal fun SearchFilters(hits: List<SearchHit>, kinds: List<HitKind>, picked: Set<HitKind>, onToggle: (HitKind) -> Unit) {
+internal fun SearchFilters(
+    hits: List<SearchHit>,
+    kinds: List<HitKind>,
+    picked: Set<HitKind>,
+    inFolder: String? = null,
+    onWiden: () -> Unit = {},
+    onToggle: (HitKind) -> Unit,
+) {
     val counts = remember(hits) { hits.groupingBy { it.kind }.eachCount() }
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        if (inFolder != null) {
+            InputChip(
+                selected = true,
+                onClick = onWiden,
+                label = { Text("In $inFolder") },
+                trailingIcon = { Icon(Icons.Filled.Clear, contentDescription = "Search all sessions", modifier = Modifier.size(18.dp)) },
+            )
+        }
         for (kind in kinds) {
             val count = counts[kind] ?: 0
             FilterChip(
@@ -591,6 +736,33 @@ internal fun NothingPicked(picked: Set<HitKind>, query: String, onClear: () -> U
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         TextButton(onClick = onClear) { Text("Show everything") }
+    }
+}
+
+/** A folder whose name (or description) matches; tapping it shows the folder. */
+@Composable
+private fun FolderRow(hit: SearchHit, folder: FolderSummary?, onOpenFolder: (String) -> Unit) {
+    val name = hit.folder ?: return
+    Row(
+        Modifier.fillMaxWidth().clickable { onOpenFolder(name) }.padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(width = 64.dp, height = 48.dp).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.secondaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(AppIcons.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            if (hit.text == name) {
+                Text(highlighted(name, hit.matches), style = MaterialTheme.typography.titleSmall)
+            } else {
+                Text(name, style = MaterialTheme.typography.titleSmall)
+                Text(highlighted(hit.text, hit.matches), style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            Text(sessionCount(folder?.sessions ?: 0), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -670,7 +842,7 @@ internal fun HitRow(session: Session, hit: SearchHit, onOpenHit: (SearchHit) -> 
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SessionCard(s: Session, onClick: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit) {
+private fun SessionCard(s: Session, showFolder: Boolean, onClick: () -> Unit, onRename: () -> Unit, onMove: () -> Unit, onDelete: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     val thumbnail = s.thumbnailNote()?.photo
     Box {
@@ -693,21 +865,21 @@ private fun SessionCard(s: Session, onClick: () -> Unit, onRename: () -> Unit, o
                     Text(s.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        summary(s),
+                        summary(s, showFolder),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
         }
-        SessionMenu(menu, onDismiss = { menu = false }, onRename, onDelete)
+        SessionMenu(menu, onDismiss = { menu = false }, onRename, onMove, onDelete)
     }
 }
 
 /** A session in the gallery view: its thumbnail (or a placeholder), with the title underneath. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SessionTile(s: Session, onClick: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit) {
+private fun SessionTile(s: Session, onClick: () -> Unit, onRename: () -> Unit, onMove: () -> Unit, onDelete: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     val thumbnail = s.thumbnailNote()?.photo
     Box {
@@ -759,12 +931,12 @@ private fun SessionTile(s: Session, onClick: () -> Unit, onRename: () -> Unit, o
                 )
             }
         }
-        SessionMenu(menu, onDismiss = { menu = false }, onRename, onDelete)
+        SessionMenu(menu, onDismiss = { menu = false }, onRename, onMove, onDelete)
     }
 }
 
 @Composable
-private fun SessionMenu(expanded: Boolean, onDismiss: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit) {
+private fun SessionMenu(expanded: Boolean, onDismiss: () -> Unit, onRename: () -> Unit, onMove: () -> Unit, onDelete: () -> Unit) {
     Box {
         DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
             DropdownMenuItem(
@@ -773,6 +945,14 @@ private fun SessionMenu(expanded: Boolean, onDismiss: () -> Unit, onRename: () -
                 onClick = {
                     onDismiss()
                     onRename()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Move to folder") },
+                leadingIcon = { Icon(AppIcons.Folder, contentDescription = null) },
+                onClick = {
+                    onDismiss()
+                    onMove()
                 },
             )
             DropdownMenuItem(
@@ -787,8 +967,9 @@ private fun SessionMenu(expanded: Boolean, onDismiss: () -> Unit, onRename: () -
     }
 }
 
-private fun summary(s: Session): String {
+private fun summary(s: Session, showFolder: Boolean = false): String {
     val parts = mutableListOf<String>()
+    if (showFolder) s.folder?.let { parts += it }
     // A session still named after its start time doesn't need the date twice.
     if (s.title != defaultSessionTitle(s.createdAt)) parts += formatDate(s.createdAt)
     if (s.recordings.isNotEmpty()) parts += "${formatTime(s.totalDurationMs)} audio"

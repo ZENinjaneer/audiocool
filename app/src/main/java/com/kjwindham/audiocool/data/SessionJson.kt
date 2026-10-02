@@ -11,6 +11,7 @@ object SessionJson {
         put("createdAt", s.createdAt)
         put("updatedAt", s.updatedAt)
         s.thumbnail?.let { put("thumbnail", it) }
+        s.folder?.let { put("folder", it) }
         if (s.chapterSummaries.isNotEmpty()) {
             put("chapterSummaries", JSONArray().apply {
                 s.chapterSummaries.forEach { put(JSONObject().put("key", it.key).put("text", it.text).put("basis", it.basis).put("model", it.model)) }
@@ -71,6 +72,7 @@ object SessionJson {
             createdAt = o.optLong("createdAt"),
             updatedAt = o.optLong("updatedAt"),
             thumbnail = if (o.has("thumbnail")) o.getString("thumbnail") else null,
+            folder = o.optString("folder").takeIf { it.isNotBlank() },
             recordings = List(recs.length()) { i ->
                 val r = recs.getJSONObject(i)
                 Recording(

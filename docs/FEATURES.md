@@ -8,6 +8,7 @@ Everything the app does and how it behaves. For the short version, see the [READ
 - [Photos and the text in them](#photos-and-the-text-in-them)
 - [Live transcription](#live-transcription)
 - [Summaries](#summaries)
+- [Folders](#folders)
 - [Search](#search)
 - [Lock screen](#lock-screen)
 - [Spoken notes](#spoken-notes)
@@ -90,12 +91,24 @@ in a background process of its own.
 - If the engine fails on a phone, only its process stops; the app tries again without speculative
   decoding, then turns summaries off. The GPU is an experimental option.
 
+## Folders
+
+- Long-press a session (or use ⋮ in it) and pick **Move to folder**, where you can also make a new folder.
+- Once there's a folder, the main screen has a row of chips: **All**, each folder, and **+** for a new
+  one. A folder's chip shows just its sessions, with how many there are and a menu to rename or
+  delete the folder. Deleting a folder keeps its sessions, outside any folder.
+- A session started while a folder is shown goes in it, and the app opens on the folder you last chose.
+- In **All**, each session's line says which folder it's in. Moving sessions doesn't change their order.
+- A session's folder is saved with it, so backups and the desktop keep it.
+
 ## Search
 
-- Find words in session names, summaries (with their key points and action items), notes, slide text
-  and transcripts: across everything from the main screen, or within one session with its 🔍 button.
-- Filters under the search box narrow it to some kinds of result: sessions, summaries, notes, slides
-  or what was said. Each shows how many it found; with none picked, everything shows.
+- Find words in folder names, session names, summaries (with their key points and action items),
+  notes, slide text and transcripts: across everything from the main screen, or within one session
+  with its 🔍 button.
+- Searching while a folder is shown keeps to that folder; the **In …** chip's ✕ searches everything.
+- Filters under the search box narrow it to some kinds of result: folders, sessions, summaries, notes,
+  slides or what was said. Each shows how many it found; with none picked, everything shows.
 - Tapping a result goes to it. From the main screen, a session's name opens the session, and anything
   else opens its session and plays from that moment. Within a session, the timeline scrolls to it and
   outlines it for a moment; a part's summary plays the part from its start.

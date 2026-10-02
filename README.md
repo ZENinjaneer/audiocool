@@ -41,8 +41,9 @@
   you jump there.
 - **Summaries.** A few sentences under each slide, and a summary of the whole session with key
   points and action items, written on the phone by Google's Gemma 4.
-- **Search everything.** Session names, summaries, notes, slide text and every word said, across all
-  your sessions, with filters to narrow it down.
+- **Folders.** Keep each course or project together; the main screen shows one folder or all.
+- **Search everything.** Folders, session names, summaries, notes, slide text and every word said,
+  with filters to narrow it down.
 - **Lock-screen controls.** Mark a moment, pause, stop or photograph a slide without unlocking.
 - **Spoken notes.** Hold the mic and say a note, through a headset if you like, while the phone
   keeps recording the room.

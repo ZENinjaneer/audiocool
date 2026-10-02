@@ -109,6 +109,7 @@ import com.kjwindham.audiocool.audio.Dictation
 import com.kjwindham.audiocool.audio.PlayerController
 import com.kjwindham.audiocool.audio.RecorderController
 import com.kjwindham.audiocool.audio.Waveform
+import com.kjwindham.audiocool.data.FolderRepository
 import com.kjwindham.audiocool.data.MARK_TEXT
 import com.kjwindham.audiocool.data.Note
 import com.kjwindham.audiocool.data.NoteFocus
@@ -118,6 +119,7 @@ import com.kjwindham.audiocool.data.Session
 import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.data.TimelineMode
 import com.kjwindham.audiocool.data.TimelineRow
+import com.kjwindham.audiocool.data.folderSummaries
 import com.kjwindham.audiocool.data.foundRowKey
 import com.kjwindham.audiocool.data.highlightedNoteId
 import com.kjwindham.audiocool.data.newId
@@ -191,6 +193,7 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
     var draftStampMs by rememberSaveable(session.id) { mutableLongStateOf(0L) }
     var showMenu by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
+    var movingToFolder by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var pickLeadIn by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Note?>(null) }
@@ -542,6 +545,10 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
                                 showMenu = false
                                 renaming = true
                             })
+                            DropdownMenuItem(text = { Text(session.folder?.let { "Folder: $it" } ?: "Move to folder") }, onClick = {
+                                showMenu = false
+                                movingToFolder = true
+                            })
                             DropdownMenuItem(text = { Text("Add photos from gallery") }, onClick = {
                                 showMenu = false
                                 gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
@@ -743,6 +750,19 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
             },
             onDismiss = { confirmLiveDownload = false },
             confirmLabel = "Download",
+        )
+    }
+    if (movingToFolder) {
+        val folders by FolderRepository.folders.collectAsStateWithLifecycle()
+        val all by SessionRepository.sessions.collectAsStateWithLifecycle()
+        MoveToFolderDialog(
+            current = session.folder,
+            folders = remember(all, folders) { folderSummaries(all, folders).map { it.name } },
+            onMove = {
+                SessionRepository.moveToFolder(session.id, it)
+                movingToFolder = false
+            },
+            onDismiss = { movingToFolder = false },
         )
     }
     if (renaming) {

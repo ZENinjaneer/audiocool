@@ -4,6 +4,7 @@ import android.app.Application
 import com.kjwindham.audiocool.audio.QuickRecord
 import com.kjwindham.audiocool.audio.RecorderController
 import com.kjwindham.audiocool.backup.BackupController
+import com.kjwindham.audiocool.data.FolderRepository
 import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.desktop.DesktopSync
 import com.kjwindham.audiocool.ocr.SlideText
@@ -26,6 +27,7 @@ class AudioCoolApp : Application() {
         // First, so a crash in anything after it is recorded.
         AppLog.init(this)
         SessionRepository.init(this)
+        FolderRepository.init(this)
         RecorderController.init(this)
         QuickRecord.init(this)
         TranscriptionController.init(this)

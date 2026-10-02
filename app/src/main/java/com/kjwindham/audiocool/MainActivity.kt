@@ -98,9 +98,9 @@ private fun AppRoot(requested: MutableState<String?>) {
                 openOnSpeech = hit.kind == HitKind.SPEECH
                 openId = hit.sessionId
             },
-            onCreate = {
+            onCreate = { folder ->
                 openOnSpeech = false
-                openId = SessionRepository.create(defaultSessionTitle()).id
+                openId = SessionRepository.create(defaultSessionTitle(), folder).id
             },
         )
     } else {

@@ -15,6 +15,7 @@ object AppIcons {
             "c3.28,-0.48 6,-3.3 6,-6.72h-1.7z",
     )
     val Pause = icon("Pause", "M6,19h4L10,5L6,5v14zM14,5v14h4L18,5h-4z")
+    val Folder = icon("Folder", "M10,4H4c-1.1,0 -1.99,0.9 -1.99,2L2,18c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2V8c0,-1.1 -0.9,-2 -2,-2h-8l-2,-2z")
     val Stop = icon("Stop", "M6,6h12v12H6z")
     val Replay = icon(
         "Replay",

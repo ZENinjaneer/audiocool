@@ -1,11 +1,12 @@
 package com.kjwindham.audiocool.search
 
+import com.kjwindham.audiocool.data.FolderSummary
 import com.kjwindham.audiocool.data.Session
 import com.kjwindham.audiocool.summarize.parseChapterKey
 import java.text.Normalizer
 
-/** What a search found: a session's title, its summary or a chapter's, a note, the text on a photo, or something said. */
-enum class HitKind { TITLE, SUMMARY, NOTE, PHOTO, SPEECH }
+/** What a search found: a folder, a session's title, its summary or a chapter's, a note, the text on a photo, or something said. */
+enum class HitKind { FOLDER, TITLE, SUMMARY, NOTE, PHOTO, SPEECH }
 
 data class SearchHit(
     val sessionId: String,
@@ -21,7 +22,19 @@ data class SearchHit(
     val timelineKey: Long = 0,
     /** For a chapter's summary, the chapter (its key). */
     val chapterKey: String? = null,
+    /** For a folder: its name. */
+    val folder: String? = null,
 )
+
+/** Folders whose name, or else description, holds every word of [query]. */
+fun searchFolders(folders: List<FolderSummary>, query: String): List<SearchHit> {
+    val terms = searchTerms(query)
+    if (terms.isEmpty()) return emptyList()
+    return folders.mapNotNull { f ->
+        findTerms(f.name, terms)?.let { SearchHit("", HitKind.FOLDER, f.name, it, folder = f.name) }
+            ?: f.description?.let { d -> findTerms(d, terms)?.let { SearchHit("", HitKind.FOLDER, d, it, folder = f.name) } }
+    }
+}
 
 /**
  * Everything in [session] that contains every word of [query]: its title and summary first, then its

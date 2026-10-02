@@ -77,6 +77,8 @@ data class Session(
     val thumbnail: String? = null,
     val chapterSummaries: List<ChapterSummary> = emptyList(),
     val summary: SessionSummary? = null,
+    /** The folder it's filed in, by name; null when it's in none. */
+    val folder: String? = null,
 ) {
     val totalDurationMs: Long get() = recordings.sumOf { it.durationMs }
 

@@ -32,6 +32,7 @@ import com.kjwindham.audiocool.audio.PlayerController
 import com.kjwindham.audiocool.audio.RecorderController
 import com.kjwindham.audiocool.audio.Waveform
 import com.kjwindham.audiocool.data.ChapterSummary
+import com.kjwindham.audiocool.data.FolderRepository
 import com.kjwindham.audiocool.data.MARK_TEXT
 import com.kjwindham.audiocool.data.Note
 import com.kjwindham.audiocool.data.Recording
@@ -227,6 +228,9 @@ class ReadmeScreenshots {
             it()
             Thread.sleep(5)
         }
+        // Filed in folders, as a semester's sessions would be.
+        mapOf("demo-sleep" to "Neuroscience 214", "demo-chem" to "Organic Chem", "demo-design" to "Work", "demo-standup" to "Work", "demo-ml" to "Machine Learning")
+            .forEach { (id, folder) -> SessionRepository.moveToFolder(id, FolderRepository.create(folder)) }
     }
 
     private val sleepTalkSaid = listOf(
@@ -617,21 +621,21 @@ class ReadmeScreenshots {
     }
 
     /**
-     * The screen once it has stopped changing for most of a second: photos decode in the background and
-     * arrive one by one. (Within a few seconds at most, since a blinking cursor never stops.)
+     * The screen once it has stopped changing for a second and a half: photos decode in the background
+     * and arrive one by one. (Ten seconds at most, since a blinking cursor never stops.)
      */
     private fun steadyScreen(): Bitmap {
         settle()
         var last = render()
         var unchanged = 0
-        repeat(60) {
+        repeat(100) {
             Thread.sleep(100)
             shadowOf(Looper.getMainLooper()).idle()
             compose.waitForIdle()
             val now = render()
             unchanged = if (now.sameAs(last)) unchanged + 1 else 0
             last = now
-            if (unchanged >= 8) return now
+            if (unchanged >= 15) return now
         }
         return last
     }

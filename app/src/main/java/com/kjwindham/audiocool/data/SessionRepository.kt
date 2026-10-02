@@ -56,15 +56,23 @@ object SessionRepository {
 
     fun get(id: String): Session? = _sessions.value.firstOrNull { it.id == id }
 
-    fun create(title: String): Session {
+    fun create(title: String, folder: String? = null): Session {
         val now = System.currentTimeMillis()
-        val s = Session(id = newId(), title = title, createdAt = now, updatedAt = now)
+        val s = Session(id = newId(), title = title, createdAt = now, updatedAt = now, folder = folder)
         _sessions.update { it + s }
         persist(s.id)
         return s
     }
 
     fun rename(id: String, title: String) = update(id) { it.copy(title = title) }
+
+    /** Files the session in [folder] (none if null). Not a change to the session itself, so the list's order stays. */
+    fun moveToFolder(id: String, folder: String?) = update(id, touch = false) { it.copy(folder = folder) }
+
+    /** Follows a folder's new name ([to]), or its removal (null). */
+    fun renameFolder(from: String, to: String?) {
+        for (s in _sessions.value) if (s.folder == from) moveToFolder(s.id, to)
+    }
 
     fun delete(id: String) {
         _sessions.update { list -> list.filterNot { it.id == id } }

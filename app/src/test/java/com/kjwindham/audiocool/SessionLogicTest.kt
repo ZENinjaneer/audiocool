@@ -4,7 +4,9 @@ import com.kjwindham.audiocool.data.Note
 import com.kjwindham.audiocool.data.NoteFocus
 import com.kjwindham.audiocool.data.Recording
 import com.kjwindham.audiocool.data.Session
+import com.kjwindham.audiocool.data.Folder
 import com.kjwindham.audiocool.data.SessionJson
+import com.kjwindham.audiocool.data.folderSummaries
 import com.kjwindham.audiocool.data.TranscriptSegment
 import com.kjwindham.audiocool.data.currentNoteId
 import com.kjwindham.audiocool.data.highlightedNoteId
@@ -26,6 +28,28 @@ class SessionLogicTest {
 
     private fun session(recordings: List<Recording>, notes: List<Note>) =
         Session("s", "Bio 101", createdAt = 0, updatedAt = 0, recordings = recordings, notes = notes)
+
+    @Test
+    fun aSessionsFolderIsSavedWithIt() {
+        val s = Session("s1", "Bio", 1, 2, folder = "Neuro 214")
+        assertEquals("Neuro 214", SessionJson.decode(SessionJson.encode(s)).folder)
+        assertEquals(null, SessionJson.decode(SessionJson.encode(s.copy(folder = null))).folder)
+    }
+
+    @Test
+    fun foldersAreListedAToZWithHowManySessionsEachHolds() {
+        val sessions = listOf(
+            Session("a", "A", 1, 1, folder = "work"),
+            Session("b", "B", 1, 1, folder = "Bio"),
+            Session("c", "C", 1, 1, folder = "Bio"),
+            Session("d", "D", 1, 1),
+        )
+        // "work" is only known from its session, as after a restore; "Empty one" has no sessions yet.
+        val list = folderSummaries(sessions, listOf(Folder("Empty one", 5), Folder("Bio", 1, "Lectures on cells")))
+        assertEquals(listOf("Bio", "Empty one", "work"), list.map { it.name })
+        assertEquals(listOf(2, 0, 1), list.map { it.sessions })
+        assertEquals("Lectures on cells", list[0].description)
+    }
 
     @Test
     fun photosAreNotesAndTheFirstOneIsTheThumbnailUntilAnotherIsPicked() {

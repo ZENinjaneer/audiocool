@@ -21,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 
 @Composable
 fun TextInputDialog(
@@ -33,6 +34,10 @@ fun TextInputDialog(
     var text by rememberSaveable(initial) { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
+        // Sized here rather than by the platform: a text field in a platform-width dialog never settles
+        // under Robolectric (the UI tests). On a phone it looks the same.
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier.padding(horizontal = 24.dp),
         title = { Text(title) },
         text = {
             OutlinedTextField(
