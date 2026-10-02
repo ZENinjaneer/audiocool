@@ -5,6 +5,7 @@ import android.app.Activity
 import android.app.Application
 import android.app.Notification
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.media.AudioDeviceInfo
@@ -50,6 +51,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -81,7 +83,7 @@ class RecordAndNoteFlowTest {
 
     @Before
     fun grantPermissions() {
-        shadowOf(app).grantPermissions(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
+        shadowOf(app).grantPermissions(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.CAMERA)
         // FileProvider remembers the app's folders in a static cache, but each test gets new ones.
         (FileProvider::class.java.getDeclaredField("sCache").apply { isAccessible = true }.get(null) as HashMap<*, *>).clear()
     }
@@ -159,6 +161,53 @@ class RecordAndNoteFlowTest {
         assertTrue(Prefs(app).galleryView)
         letPhotosLoad()
         screenshot("11-gallery")
+    }
+
+    @Test
+    fun theCameraAsksForItsPermissionFirstRatherThanCrashing() {
+        // 1.7 to 1.9 opened the camera app straight away. An app that declares the camera permission (this
+        // one does, for the lock screen's camera) may only do that once it's granted: otherwise Android
+        // throws, and the app crashed. (Robolectric doesn't throw, so the test checks the order instead.)
+        shadowOf(app).denyPermissions(Manifest.permission.CAMERA)
+        compose.onNodeWithContentDescription("New session").performClick()
+        compose.onNodeWithText("Start recording").performClick()
+        advance(5)
+        compose.onNodeWithContentDescription("Take a photo").performClick()
+        // What opened was Android's prompt for the camera, not the camera app.
+        val prompt = permissionPrompt(Manifest.permission.CAMERA)
+
+        // Declined: it says how to allow it, and the recording carries on.
+        answer(prompt, PackageManager.PERMISSION_DENIED)
+        compose.onNodeWithText("To take photos, allow AudioCool to use the camera", substring = true).assertIsDisplayed()
+        assertNull(shadowOf(compose.activity).peekNextStartedActivityForResult())
+        assertEquals(RecorderController.Status.RECORDING, RecorderController.state.value.status)
+        // Android stops asking after a second no, so the message has a way to the app's settings.
+        shadowOf(compose.activity).clearNextStartedActivities()
+        compose.onNodeWithText("Settings").performClick()
+        compose.waitForIdle()
+        val settings = shadowOf(compose.activity).nextStartedActivity
+        assertEquals(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, settings.action)
+        assertEquals("package:${app.packageName}", settings.dataString)
+        shadowOf(compose.activity).clearNextStartedActivities()
+
+        // Allowed: the camera app opens, for the moment the button was tapped.
+        advance(5)
+        compose.onNodeWithContentDescription("Take a photo").performClick()
+        val again = permissionPrompt(Manifest.permission.CAMERA)
+        // Time spent on the prompt doesn't move the photo.
+        advance(3)
+        shadowOf(app).grantPermissions(Manifest.permission.CAMERA)
+        answer(again, PackageManager.PERMISSION_GRANTED)
+        val request = shadowOf(compose.activity).nextStartedActivityForResult.intent
+        assertEquals(MediaStore.ACTION_IMAGE_CAPTURE, request.action)
+        @Suppress("DEPRECATION")
+        val output = request.getParcelableExtra<Uri>(MediaStore.EXTRA_OUTPUT)!!
+        val slide = Bitmap.createBitmap(800, 450, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.DKGRAY) }
+        File(app.cacheDir, "capture/${output.lastPathSegment}").outputStream().use { slide.compress(Bitmap.CompressFormat.JPEG, 80, it) }
+        shadowOf(compose.activity).receiveResult(request, Activity.RESULT_OK, Intent())
+        compose.waitUntil(10_000) { SessionRepository.sessions.value.single().notes.any { it.photo != null } }
+        val photo = SessionRepository.sessions.value.single().notes.single { it.photo != null }
+        assertTrue("linked at ${photo.offsetMs}", photo.offsetMs!! in 9_000L..11_500L)
     }
 
     @Test
@@ -546,6 +595,27 @@ class RecordAndNoteFlowTest {
     }
 
     /** Lets [seconds] pass on the main looper's clock, which also drives SystemClock. */
+    /** The permission prompt just opened, which must be asking for [permission] (and nothing has opened since). */
+    private fun permissionPrompt(permission: String): Intent {
+        val prompt = shadowOf(compose.activity).nextStartedActivityForResult.intent
+        assertEquals("android.content.pm.action.REQUEST_PERMISSIONS", prompt.action)
+        assertEquals(listOf(permission), shadowOf(compose.activity).lastRequestedPermission.requestedPermissions.toList())
+        assertNull(shadowOf(compose.activity).peekNextStartedActivityForResult())
+        return prompt
+    }
+
+    /** Answers [prompt] as Android does, through the activity's results, after which the app may ask again. */
+    private fun answer(prompt: Intent, result: Int) {
+        val asked = shadowOf(compose.activity).lastRequestedPermission.requestedPermissions
+        shadowOf(compose.activity).receiveResult(
+            prompt, Activity.RESULT_OK,
+            Intent()
+                .putExtra("android.content.pm.extra.REQUEST_PERMISSIONS_NAMES", asked)
+                .putExtra("android.content.pm.extra.REQUEST_PERMISSIONS_RESULTS", IntArray(asked.size) { result }),
+        )
+        compose.waitForIdle()
+    }
+
     private fun advance(seconds: Long) {
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(seconds))
         compose.waitForIdle()

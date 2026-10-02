@@ -2,8 +2,11 @@ package com.kjwindham.audiocool.ui
 
 import android.Manifest
 import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -57,8 +60,10 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -135,6 +140,9 @@ import kotlinx.coroutines.launch
 private data class Stamp(val recId: String, val offsetMs: Long)
 
 private const val TAG = "SessionScreen"
+
+private const val NO_CAMERA_MESSAGE =
+    "To take photos, allow AudioCool to use the camera (in Settings, under Permissions). Meanwhile, ⋮ › Add photos from gallery works."
 
 /**
  * A session: everything in it on one timeline (notes, photos and what was said), the recording or
@@ -355,10 +363,18 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
         }
     }
 
-    /** Opens the camera; the photo links to this moment (when the button was tapped). */
-    fun takePhoto() {
+    /** Says the camera isn't allowed, with a way to the app's settings, since Android stops asking after a second no. */
+    fun cameraNotAllowed() {
+        scope.launch {
+            if (snackbar.showSnackbar(NO_CAMERA_MESSAGE, actionLabel = "Settings", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) {
+                context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)))
+            }
+        }
+    }
+
+    /** Opens the camera app for a photo linked to [stamp]. */
+    fun openCamera(stamp: Stamp?) {
         val (file, uri) = Photos.newCapture(context)
-        val stamp = currentStamp()
         capturePath = file.path
         captureRec = stamp?.recId
         captureMs = stamp?.offsetMs ?: -1L
@@ -369,6 +385,36 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
             capturePath = null
             file.delete()
             toast("There's no camera app to take a photo with.")
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Not allowed to open the camera app", e)
+            capturePath = null
+            file.delete()
+            cameraNotAllowed()
+        }
+    }
+
+    // The moment the camera button was tapped, kept while Android asks about the camera.
+    var pendingPhotoRec by rememberSaveable(session.id) { mutableStateOf<String?>(null) }
+    var pendingPhotoMs by rememberSaveable(session.id) { mutableLongStateOf(-1L) }
+    val cameraPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val stamp = pendingPhotoRec?.let { Stamp(it, pendingPhotoMs) }
+        pendingPhotoRec = null
+        if (granted) openCamera(stamp) else cameraNotAllowed()
+    }
+
+    /**
+     * Takes a photo with the camera app; it links to this moment (when the button was tapped). Because
+     * the app declares the camera permission (for the lock screen's camera), Android only lets it open
+     * the camera app once that's granted, so ask first.
+     */
+    fun takePhoto() {
+        val stamp = currentStamp()
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            openCamera(stamp)
+        } else {
+            pendingPhotoRec = stamp?.recId
+            pendingPhotoMs = stamp?.offsetMs ?: -1L
+            cameraPermission.launch(Manifest.permission.CAMERA)
         }
     }
 
