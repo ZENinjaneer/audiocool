@@ -62,6 +62,8 @@ class TimelineUiTest {
     fun setUp() {
         shadowOf(app).grantPermissions(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
         Prefs(app).timelineMode = "EVERYTHING"
+        // About the timeline itself: no offer to set up summaries above it.
+        Prefs(app).summaryOfferDismissed = true
         val session = SessionRepository.create("Scaling Inference on the Edge")
         sessionId = session.id
         val dir = SessionRepository.sessionDir(session.id).apply { mkdirs() }

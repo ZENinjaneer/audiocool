@@ -21,6 +21,26 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("unreported_crash", false)
         set(value) = sp.edit(commit = true) { putBoolean("unreported_crash", value) }
 
+    /** Summarize sessions on the phone once the summary model is downloaded. */
+    var summaries: Boolean
+        get() = sp.getBoolean("summaries", true)
+        set(value) = sp.edit { putBoolean("summaries", value) }
+
+    /** The summary model on this phone's GPU: "on" when asked for, "failed" once it's crashed there; else off. */
+    var summaryGpu: String
+        get() = sp.getString("summary_gpu", "").orEmpty()
+        set(value) = sp.edit(commit = true) { putString("summary_gpu", value) }
+
+    /** Speculative decoding has crashed the summary model on this phone; go without it. */
+    var summaryNoSpeculative: Boolean
+        get() = sp.getBoolean("summary_no_speculative", false)
+        set(value) = sp.edit(commit = true) { putBoolean("summary_no_speculative", value) }
+
+    /** "Not now" was chosen on the offer to set up summaries. */
+    var summaryOfferDismissed: Boolean
+        get() = sp.getBoolean("summary_offer_dismissed", false)
+        set(value) = sp.edit { putBoolean("summary_offer_dismissed", value) }
+
     /** Show sessions on the main screen as a grid of thumbnails rather than a list. */
     var galleryView: Boolean
         get() = sp.getBoolean("gallery_view", false)

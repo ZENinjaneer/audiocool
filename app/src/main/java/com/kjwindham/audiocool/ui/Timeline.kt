@@ -216,7 +216,7 @@ fun TimelinePane(
         modifier = modifier.fillMaxWidth().background(colors.page),
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp),
     ) {
-        item(key = "header") { header() }
+        item(key = "header") { Column { header() } }
         itemsIndexed(rows, key = { _, row -> row.key }) { _, row ->
             when (row) {
                 is TimelineRow.RecordingStart -> Text(
@@ -277,6 +277,7 @@ fun TimelinePane(
                     onDelete = { SessionRepository.deleteNote(session.id, row.note.id) },
                 )
                 is TimelineRow.Fold -> FoldDivider(row, onClick = { onFold(row) })
+                is TimelineRow.Summary -> ChapterSummaryBlock(row.text)
             }
         }
         item(key = "footer") {
@@ -582,6 +583,23 @@ private fun MarkPill(
             )
         }
         NoteMenu(menu, onDismiss = { menu = false }, onEdit = onEdit, onDelete = onDelete, editLabel = "Add a note here")
+    }
+}
+
+/** A chapter's summary, under its slide (or where it starts): set apart from what was said and written. */
+@Composable
+private fun ChapterSummaryBlock(text: String) {
+    Row(
+        Modifier
+            .padding(top = 2.dp, bottom = 6.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f))
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text("✦", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(end = 8.dp))
+        Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer)
     }
 }
 

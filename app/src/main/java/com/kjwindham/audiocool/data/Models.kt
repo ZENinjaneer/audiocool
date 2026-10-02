@@ -42,6 +42,27 @@ data class Note(
         get() = photoText?.trim()?.takeIf { text -> text.count { it.isLetterOrDigit() } >= 4 }
 }
 
+/** A short summary of one chapter of a session (see summarize/Chapters.kt), made by a language model. */
+data class ChapterSummary(
+    val key: String,
+    val text: String,
+    /** A fingerprint of what it was made from, so it's redone when that changes. */
+    val basis: String,
+    /** Which model made it, and where: on the phone or on the desktop. */
+    val model: String,
+)
+
+/** The whole session, summarized from its chapters' summaries and the notes. */
+data class SessionSummary(
+    val text: String,
+    val keyPoints: List<String> = emptyList(),
+    val actionItems: List<String> = emptyList(),
+    val title: String? = null,
+    val basis: String,
+    val model: String,
+    val createdAt: Long,
+)
+
 /** The text of a ★ mark. */
 const val MARK_TEXT = "★ Marked"
 
@@ -54,6 +75,8 @@ data class Session(
     val notes: List<Note> = emptyList(),
     /** The photo note picked to stand for the session in lists; by default, the first photo. */
     val thumbnail: String? = null,
+    val chapterSummaries: List<ChapterSummary> = emptyList(),
+    val summary: SessionSummary? = null,
 ) {
     val totalDurationMs: Long get() = recordings.sumOf { it.durationMs }
 

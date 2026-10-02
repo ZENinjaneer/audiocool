@@ -58,8 +58,8 @@ android {
         applicationId = "com.kjwindham.audiocool"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.8.1"
+        versionCode = 12
+        versionName = "1.9"
         // The speech engine is native code; ship only the 64-bit ARM build every current phone uses.
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -158,6 +158,8 @@ dependencies {
     implementation("androidx.camera:camera-camera2:1.5.3")
     implementation("androidx.camera:camera-lifecycle:1.5.3")
     implementation("androidx.camera:camera-view:1.5.3")
+    // Summaries on the phone: runs a downloaded Gemma model (CPU, or the GPU through OpenCL).
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.17.1")
     // Reads the text in photos of slides; the model is bundled, so it works offline.
     implementation("com.google.mlkit:text-recognition:16.0.1")
     // Scans the desktop's pairing QR code with Google's scanner (no camera permission needed).

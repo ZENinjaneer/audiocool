@@ -11,6 +11,22 @@ object SessionJson {
         put("createdAt", s.createdAt)
         put("updatedAt", s.updatedAt)
         s.thumbnail?.let { put("thumbnail", it) }
+        if (s.chapterSummaries.isNotEmpty()) {
+            put("chapterSummaries", JSONArray().apply {
+                s.chapterSummaries.forEach { put(JSONObject().put("key", it.key).put("text", it.text).put("basis", it.basis).put("model", it.model)) }
+            })
+        }
+        s.summary?.let { sum ->
+            put("summary", JSONObject().apply {
+                put("text", sum.text)
+                put("keyPoints", JSONArray(sum.keyPoints))
+                put("actionItems", JSONArray(sum.actionItems))
+                sum.title?.let { put("title", it) }
+                put("basis", sum.basis)
+                put("model", sum.model)
+                put("createdAt", sum.createdAt)
+            })
+        }
         put("recordings", JSONArray().apply {
             s.recordings.forEach { r ->
                 put(JSONObject().apply {
@@ -84,6 +100,25 @@ object SessionJson {
                     spoken = n.optBoolean("spoken"),
                 )
             },
+            chapterSummaries = o.optJSONArray("chapterSummaries")?.let { a ->
+                List(a.length()) { i ->
+                    val c = a.getJSONObject(i)
+                    ChapterSummary(c.getString("key"), c.getString("text"), c.optString("basis"), c.optString("model"))
+                }
+            }.orEmpty(),
+            summary = o.optJSONObject("summary")?.let { sum ->
+                SessionSummary(
+                    text = sum.getString("text"),
+                    keyPoints = sum.optJSONArray("keyPoints").strings(),
+                    actionItems = sum.optJSONArray("actionItems").strings(),
+                    title = if (sum.has("title")) sum.getString("title") else null,
+                    basis = sum.optString("basis"),
+                    model = sum.optString("model"),
+                    createdAt = sum.optLong("createdAt"),
+                )
+            },
         )
     }
+
+    private fun JSONArray?.strings(): List<String> = if (this == null) emptyList() else List(length()) { getString(it) }
 }

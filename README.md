@@ -9,6 +9,16 @@ recording when you started typing it; tap a note to play from just before that m
   into "2:15 of talk", which you can tap open) and *Notes only*. While it plays, the paragraph playing
   lights up, the latest photo opens up and each note grows as playback passes it; the timeline
   follows along. Tap anything to play from there (notes from a few seconds before).
+- **Summaries, on the phone:** Google's Gemma 4 E2B (2.6 GB, downloaded once; ⋮ › Summaries) runs
+  through LiteRT-LM in a background process of its own. A session is cut into chapters, each a slide
+  photo and what was said until the next one (or a few minutes of talk), and each chapter is summarized
+  in two or three sentences as soon as it's complete, during a recording too. When the whole session is
+  done, it gets a summary with key points and action items (taken from the talk and your notes), and a
+  title if it still has its date-and-time name. Summaries appear on the timeline: the session's at the
+  top, each chapter's under its slide. It runs at low priority with two CPU threads while recording,
+  so live transcription keeps up, and waits while recordings are transcribed. If the engine fails on a
+  phone, only its process stops; the app tries again without speculative decoding, then turns
+  summaries off. The GPU is an experimental option.
 - **Waveform scrubber:** drag along the recording's waveform to move through it, and the timeline
   follows your finger. Notes, marks and photos sit above it as dots and thumbnails: tap one, or press
   and slide along them, for a quick preview (the note, the photo, or for a ★ what was being said),
@@ -56,7 +66,10 @@ recording when you started typing it; tap a note to play from just before that m
   one session (its search button). Tapping a result plays from that moment.
 - **Backup:** pick a folder (⋮ › Backup & restore) and every session (audio, notes, transcript) is
   copied there automatically. The copy survives uninstalling; *Restore from a backup* brings it back.
-- Share sends the notes as Markdown (with the transcript) plus the audio files and photos.
+- Share sends the notes as Markdown (with the summary and transcript) plus the audio files and photos.
+- **The app's log:** ⋮ › Share the app's log sends one text file with crash reports (version, phone,
+  full stack) and the app's own log, which logcat keeps in rotating files as the app runs (2 MB at
+  most). After a crash, the next launch offers to share it. No notes or recordings are in it.
 - Audio is recorded as AAC in ADTS framing (`.aac`), which stays playable even if the app is killed
   mid-recording, then converted to `.m4a` without re-encoding so long recordings open and seek instantly.
 

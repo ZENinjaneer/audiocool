@@ -67,6 +67,33 @@ fun sessionMarkdown(session: Session, includeTranscript: Boolean = false): Strin
         // Then what the photo says, quoted under it.
         n.textInPhoto?.lines()?.forEach { appendLine("  > $it".trimEnd()) }
     }
+    session.summary?.takeIf { it.text.isNotBlank() }?.let { s ->
+        appendLine()
+        appendLine("## Summary")
+        appendLine()
+        appendLine(s.text)
+        if (s.keyPoints.isNotEmpty()) {
+            appendLine()
+            appendLine("Key points:")
+            s.keyPoints.forEach { appendLine("- $it") }
+        }
+        if (s.actionItems.isNotEmpty()) {
+            appendLine()
+            appendLine("Action items:")
+            s.actionItems.forEach { appendLine("- [ ] $it") }
+        }
+    }
+    val parts = com.kjwindham.audiocool.summarize.chapters(session) { null }.filterNot { it.slight }
+        .mapNotNull { c -> session.chapterSummaries.firstOrNull { it.key == c.key }?.text?.takeIf { it.isNotBlank() }?.let { c to it } }
+    if (parts.size > 1) {
+        appendLine()
+        appendLine("## Part by part")
+        appendLine()
+        for ((c, text) in parts) {
+            val slide = c.photo?.let { p -> p.text.ifBlank { p.textInPhoto?.lineSequence()?.firstOrNull() ?: "" } }?.takeIf { it.isNotBlank() }
+            appendLine("- [${timeLabel(session, c.recId, c.startMs)}]${slide?.let { " $it:" } ?: ""} $text")
+        }
+    }
     if (recs.isNotEmpty()) {
         appendLine()
         appendLine("Audio: " + recs.joinToString { "${it.file} (${formatTime(it.durationMs)})" })

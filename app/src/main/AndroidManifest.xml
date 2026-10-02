@@ -78,6 +78,21 @@
             </intent-filter>
         </receiver>
 
+        <!-- The summary model, in a process of its own: a crash in its native engine can't take the app down. -->
+        <service
+            android:name=".summarize.SummaryEngineService"
+            android:exported="false"
+            android:process=":summaries" />
+
+        <service
+            android:name=".summarize.SummaryService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- The summary model can run on the GPU through OpenCL, where the phone has it. -->
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
+        <uses-native-library android:name="libvndksupport.so" android:required="false" />
+
         <service
             android:name=".transcribe.TranscriptionService"
             android:exported="false"

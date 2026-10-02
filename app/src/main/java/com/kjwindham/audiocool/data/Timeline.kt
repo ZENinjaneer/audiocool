@@ -41,6 +41,11 @@ sealed interface TimelineRow {
         override val key get() = noteKey(note.id)
     }
 
+    /** A summary of the chapter starting here (after its photo, if it has one). */
+    data class Summary(val chapterKey: String, val text: String) : TimelineRow {
+        override val key get() = "summary:$chapterKey"
+    }
+
     /** Talk left out of [TimelineMode.CONTEXT]; [firstKey] is its first paragraph in the full view. */
     data class Fold(val recId: String, val fromMs: Long, val skippedMs: Long, val firstKey: String) : TimelineRow {
         override val key get() = "fold:$recId:$fromMs"
@@ -117,6 +122,16 @@ fun timelineRows(session: Session, mode: TimelineMode): List<TimelineRow> {
             placed += Placed(rec.createdAt + (para?.startMs ?: at), 2, at, note.toRow())
         }
         for (p in paras) placed += Placed(rec.createdAt + p.startMs, 1, p.startMs, p.copy(noteIds = notesIn[p.key].orEmpty()))
+    }
+    // Each chapter's summary, where the chapter starts: after its photo, before what was said. (Only with
+    // several chapters; a session that's one chapter has just its summary at the top.)
+    val chapterList = com.kjwindham.audiocool.summarize.chapters(session) { null }.filterNot { it.slight }
+    if (chapterList.size > 1) {
+        for (c in chapterList) {
+            val text = session.chapterSummaries.firstOrNull { it.key == c.key }?.text?.takeIf { it.isNotBlank() } ?: continue
+            val rec = session.recording(c.recId) ?: continue
+            placed += Placed(rec.createdAt + c.startMs, 0, Long.MAX_VALUE, TimelineRow.Summary(c.key, text))
+        }
     }
     for (note in notes) {
         if (note.offsetMs != null && session.recording(note.recId) != null) continue

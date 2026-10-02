@@ -48,6 +48,7 @@ class TimelineTest {
             is TimelineRow.Written -> (if (row.note.spoken) "spoken " else "note ") + row.note.id
             is TimelineRow.Mark -> "mark ${row.note.id}"
             is TimelineRow.Fold -> "fold ${row.fromMs / 1000} +${row.skippedMs / 1000}s"
+            is TimelineRow.Summary -> "summary ${row.chapterKey}"
         }
     }
 

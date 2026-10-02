@@ -538,6 +538,7 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
                         jumpTo = jumpTo,
                         onJumpDone = { jumpTo = null },
                         header = {
+                            SummaryCard(session)
                             TranscriptStatus(
                                 session = session,
                                 transcription = transcription,

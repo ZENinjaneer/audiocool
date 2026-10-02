@@ -40,6 +40,12 @@ object LiveTranscription {
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
 
+    /** Says [recId] is being transcribed live, without the speech model; for tests. */
+    @androidx.annotation.VisibleForTesting
+    fun pretendForTest(sessionId: String?, recId: String?) {
+        _state.value = State(sessionId, recId)
+    }
+
     private class Run(val sessionId: String, val recId: String, val source: AdtsTailSource) {
         @Volatile
         var transcriber: LiveTranscriber? = null

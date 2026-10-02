@@ -4,13 +4,10 @@ import android.content.Context
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
+import com.kjwindham.audiocool.util.fetchResumable
+import com.kjwindham.audiocool.util.sha256
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import java.security.MessageDigest
-import java.util.concurrent.CancellationException
 
 /**
  * The on-device speech model: NVIDIA Parakeet 0.6B (English, int8), downloaded once from Hugging Face.
@@ -77,7 +74,7 @@ object SpeechModel {
             val target = File(dir, f.name)
             if (target.length() != f.size) {
                 val part = File(dir, f.name + ".part")
-                fetch("$BASE_URL/${f.name}", part, f.size, isCancelled) { onProgress(finished + it, totalBytes) }
+                fetchResumable("$BASE_URL/${f.name}", part, f.size, isCancelled) { onProgress(finished + it, totalBytes) }
                 if (part.length() != f.size || sha256(part) != f.sha256) {
                     part.delete()
                     throw IOException("The download of ${f.name} was damaged; try again")
@@ -88,54 +85,5 @@ object SpeechModel {
             finished += f.size
             onProgress(finished, totalBytes)
         }
-    }
-
-    private fun fetch(url: String, part: File, expected: Long, isCancelled: () -> Boolean, onBytes: (Long) -> Unit) {
-        var have = part.length()
-        if (have >= expected) {
-            part.delete()
-            have = 0
-        }
-        val conn = URL(url).openConnection() as HttpURLConnection
-        conn.connectTimeout = 20_000
-        conn.readTimeout = 60_000
-        if (have > 0) conn.setRequestProperty("Range", "bytes=$have-")
-        try {
-            val code = conn.responseCode
-            if (code != HttpURLConnection.HTTP_OK && code != HttpURLConnection.HTTP_PARTIAL) {
-                throw IOException("The model download failed (HTTP $code)")
-            }
-            // A server that ignores the Range request sends the whole file again.
-            val resume = code == HttpURLConnection.HTTP_PARTIAL && have > 0
-            var total = if (resume) have else 0L
-            conn.inputStream.use { input ->
-                FileOutputStream(part, resume).use { out ->
-                    val buf = ByteArray(1 shl 16)
-                    while (true) {
-                        if (isCancelled()) throw CancellationException()
-                        val n = input.read(buf)
-                        if (n < 0) break
-                        out.write(buf, 0, n)
-                        total += n
-                        onBytes(total)
-                    }
-                }
-            }
-        } finally {
-            conn.disconnect()
-        }
-    }
-
-    private fun sha256(f: File): String {
-        val md = MessageDigest.getInstance("SHA-256")
-        f.inputStream().use { input ->
-            val buf = ByteArray(1 shl 16)
-            while (true) {
-                val n = input.read(buf)
-                if (n < 0) break
-                md.update(buf, 0, n)
-            }
-        }
-        return md.digest().joinToString("") { "%02x".format(it) }
     }
 }

@@ -127,6 +127,13 @@ object SessionRepository {
         s.copy(notes = s.notes.map { if (it.id == noteId) it.copy(photoText = text) else it })
     }
 
+    /** Saves a chapter's summary in place of any earlier one, and drops those of chapters not in [chapters] any more. */
+    fun setChapterSummary(sessionId: String, summary: ChapterSummary, chapters: Set<String>) = update(sessionId, touch = false) { s ->
+        s.copy(chapterSummaries = s.chapterSummaries.filter { it.key != summary.key && it.key in chapters } + summary)
+    }
+
+    fun setSessionSummary(sessionId: String, summary: SessionSummary?) = update(sessionId, touch = false) { it.copy(summary = summary) }
+
     /** Shows the photo note [noteId] for the session in lists. */
     fun setThumbnail(sessionId: String, noteId: String) = update(sessionId) { it.copy(thumbnail = noteId) }
 
