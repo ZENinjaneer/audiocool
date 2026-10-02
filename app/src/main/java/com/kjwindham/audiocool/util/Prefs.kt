@@ -21,6 +21,41 @@ class Prefs(context: Context) {
         get() = sp.getString("shown_folder", "").orEmpty()
         set(value) = sp.edit { putString("shown_folder", value) }
 
+    /** File each new session in the folder that fits once its summary is ready (the summary model decides). */
+    var autoFile: Boolean
+        get() = sp.getBoolean("auto_file", false)
+        set(value) = sp.edit { putBoolean("auto_file", value) }
+
+    /** When [autoFile] was turned on: older sessions are left for suggestions. */
+    var autoFileSince: Long
+        get() = sp.getLong("auto_file_since", 0)
+        set(value) = sp.edit { putLong("auto_file_since", value) }
+
+    /** Sessions the model has already placed (or found no folder for), so they aren't asked about again. */
+    var autoFileDone: Set<String>
+        get() = sp.getStringSet("auto_file_done", emptySet()).orEmpty()
+        set(value) = sp.edit { putStringSet("auto_file_done", value) }
+
+    /** Folders the model suggested and that haven't been reviewed yet, as JSON. */
+    var folderSuggestions: String
+        get() = sp.getString("folder_suggestions", "").orEmpty()
+        set(value) = sp.edit { putString("folder_suggestions", value) }
+
+    /** What the last suggestions were made from, so the same sessions aren't looked at twice. */
+    var suggestBasis: String
+        get() = sp.getString("suggest_basis", "").orEmpty()
+        set(value) = sp.edit { putString("suggest_basis", value) }
+
+    /** How many sessions were in no folder when suggestions were last turned down. */
+    var suggestDismissedAt: Int
+        get() = sp.getInt("suggest_dismissed_at", 0)
+        set(value) = sp.edit { putInt("suggest_dismissed_at", value) }
+
+    /** File a session recorded during a calendar event in a folder named after it. */
+    var calendarFolders: Boolean
+        get() = sp.getBoolean("calendar_folders", false)
+        set(value) = sp.edit { putBoolean("calendar_folders", value) }
+
     /** The app crashed and the log hasn't been shared since: offer to. */
     var unreportedCrash: Boolean
         get() = sp.getBoolean("unreported_crash", false)

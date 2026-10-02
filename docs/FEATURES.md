@@ -100,6 +100,15 @@ in a background process of its own.
 - A session started while a folder is shown goes in it, and the app opens on the folder you last chose.
 - In **All**, each session's line says which folder it's in. Moving sessions doesn't change their order.
 - A session's folder is saved with it, so backups and the desktop keep it.
+- **Suggested folders:** with summaries on (⋮ › Summaries), once a few summarized sessions aren't in a
+  folder, the summary model groups the ones that go together (the same course, project or recurring
+  meeting) and names each group. A card on the main screen offers them, and nothing moves until you've
+  looked: untick a folder or rename it, then **Organize**, with **Undo** if you change your mind.
+  ⋮ › Folders › **Suggest folders** asks for suggestions any time.
+- **Keep new sessions organized:** each new session goes in the folder that fits once its summary is
+  ready, with a note to change it. It's on after you organize, and ⋮ › Folders turns it off and on.
+- **File by calendar** (off unless you turn it on, in ⋮ › Folders): a session recorded during an event
+  on your calendar goes in a folder named after the event. It only reads your calendar, and asks first.
 
 ## Search
 

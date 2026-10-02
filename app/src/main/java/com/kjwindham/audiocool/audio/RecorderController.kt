@@ -15,6 +15,7 @@ import com.kjwindham.audiocool.data.MARK_TEXT
 import com.kjwindham.audiocool.data.Note
 import com.kjwindham.audiocool.data.Recording
 import com.kjwindham.audiocool.data.SessionRepository
+import com.kjwindham.audiocool.summarize.CalendarFiling
 import com.kjwindham.audiocool.data.newId
 import com.kjwindham.audiocool.transcribe.LiveTranscription
 import com.kjwindham.audiocool.transcribe.TranscriptionController
@@ -134,6 +135,7 @@ object RecorderController {
         startTicker()
         RecordingService.start(app)
         LiveTranscription.start(app, sessionId, rec.id, file)
+        CalendarFiling.fileNow(app, sessionId)
         return true
     }
 

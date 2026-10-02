@@ -8,6 +8,7 @@ import com.kjwindham.audiocool.data.FolderRepository
 import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.desktop.DesktopSync
 import com.kjwindham.audiocool.ocr.SlideText
+import com.kjwindham.audiocool.summarize.Organizer
 import com.kjwindham.audiocool.summarize.SummaryController
 import com.kjwindham.audiocool.transcribe.TranscriptionController
 import com.kjwindham.audiocool.util.AppLog
@@ -35,5 +36,6 @@ class AudioCoolApp : Application() {
         DesktopSync.init(this)
         SlideText.init(this)
         SummaryController.init(this)
+        Organizer.init(this)
     }
 }

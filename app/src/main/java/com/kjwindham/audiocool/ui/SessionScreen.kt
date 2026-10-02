@@ -131,6 +131,7 @@ import com.kjwindham.audiocool.desktop.DesktopSync
 import com.kjwindham.audiocool.search.HitKind
 import com.kjwindham.audiocool.search.SearchHit
 import com.kjwindham.audiocool.search.searchSession
+import com.kjwindham.audiocool.summarize.Organizer
 import com.kjwindham.audiocool.transcribe.LiveTranscription
 import com.kjwindham.audiocool.transcribe.TranscriptionController
 import com.kjwindham.audiocool.util.Prefs
@@ -194,6 +195,14 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
     var showMenu by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
     var movingToFolder by remember { mutableStateOf(false) }
+    LaunchedEffect(session.id) {
+        Organizer.filed.collect { f ->
+            if (f.sessionId != session.id || !f.byCalendar) return@collect
+            if (snackbar.showSnackbar("Filed in “${f.folder}” from your calendar", actionLabel = "Change", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) {
+                movingToFolder = true
+            }
+        }
+    }
     var confirmDelete by remember { mutableStateOf(false) }
     var pickLeadIn by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Note?>(null) }

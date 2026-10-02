@@ -13,6 +13,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- Photos of the slides from the lock screen, where the phone's camera app can't hand them back. -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Optional: filing a recording by the calendar event it was made during (off until turned on). -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
     <!-- Only to put the lock screen's Record button back after a restart, when that's turned on. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />

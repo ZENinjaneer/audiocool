@@ -1,6 +1,10 @@
 package com.kjwindham.audiocool.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -55,8 +59,10 @@ import androidx.compose.material3.InputChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -85,6 +91,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kjwindham.audiocool.audio.RecorderController
 import com.kjwindham.audiocool.data.FolderRepository
@@ -96,6 +103,8 @@ import com.kjwindham.audiocool.search.HitKind
 import com.kjwindham.audiocool.search.SearchHit
 import com.kjwindham.audiocool.search.searchAll
 import com.kjwindham.audiocool.search.searchFolders
+import com.kjwindham.audiocool.summarize.Organizer
+import com.kjwindham.audiocool.summarize.SummaryController
 import com.kjwindham.audiocool.transcribe.SpeechModel
 import com.kjwindham.audiocool.transcribe.TranscriptionController
 import com.kjwindham.audiocool.util.AppLog
@@ -158,6 +167,37 @@ fun SessionListScreen(
     fun show(name: String?) {
         shownName = name
         prefs.shownFolder = name.orEmpty()
+    }
+
+    // Organizing with the summary model.
+    val suggestions by Organizer.suggestions.collectAsStateWithLifecycle()
+    val lookingForFolders by Organizer.looking.collectAsStateWithLifecycle()
+    val summaryState by SummaryController.state.collectAsStateWithLifecycle()
+    var reviewingSuggestions by remember { mutableStateOf(false) }
+    var showFolderSettings by remember { mutableStateOf(false) }
+    var keepOrganized by remember { mutableStateOf(prefs.autoFile) }
+    var byCalendar by remember { mutableStateOf(prefs.calendarFolders) }
+    val calendarPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        byCalendar = granted
+        prefs.calendarFolders = granted
+        if (!granted) scope.launch { snackbar.showSnackbar("Filing by calendar needs permission to read your calendar.") }
+    }
+    LaunchedEffect(Unit) {
+        launch {
+            Organizer.filed.collect { f ->
+                // Filing by calendar happens as a recording starts, so the session screen says so.
+                if (f.byCalendar) return@collect
+                val title = SessionRepository.get(f.sessionId)?.title ?: return@collect
+                if (snackbar.showSnackbar("Filed “$title” in ${f.folder}", actionLabel = "Change", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) {
+                    moving = SessionRepository.get(f.sessionId)
+                }
+            }
+        }
+        launch {
+            Organizer.nothingToSuggest.collect {
+                snackbar.showSnackbar("Nothing to group yet: suggestions need a few summarized sessions that aren't in a folder.")
+            }
+        }
     }
     val untranscribed = sessions.sumOf { s ->
         s.recordings.count { it.durationMs > 0 && it.transcript == null && !transcription.isPending(s.id, it.id) }
@@ -245,10 +285,10 @@ fun SessionListScreen(
                                     },
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("New folder") },
+                                    text = { Text("Folders") },
                                     onClick = {
                                         showMenu = false
-                                        creatingFolder = true
+                                        showFolderSettings = true
                                     },
                                 )
                                 DropdownMenuItem(
@@ -376,6 +416,17 @@ fun SessionListScreen(
                     )
                 }
             }
+            if (!searching && (suggestions != null || lookingForFolders)) {
+                item(key = "organize", span = wide) {
+                    OrganizeCard(
+                        suggestions,
+                        lookingForFolders,
+                        sessionCount = suggestions.orEmpty().sumOf { it.sessionIds.size },
+                        onReview = { reviewingSuggestions = true },
+                        onDismiss = { Organizer.dismiss(sessions.count { it.folder == null && it.summary != null }) },
+                    )
+                }
+            }
             if (visible.isEmpty()) {
                 item(key = "empty", span = wide) {
                     if (shown == null) {
@@ -403,6 +454,60 @@ fun SessionListScreen(
         }
     }
 
+    if (reviewingSuggestions) {
+        suggestions?.let { list ->
+            // As things are now: sessions deleted or filed by hand since drop out.
+            val unfiled = sessions.filter { it.folder == null }.associate { it.id to it.title }
+            val current = list.map { f -> f.copy(sessionIds = f.sessionIds.filter { it in unfiled }) }.filter { it.sessionIds.isNotEmpty() }
+            OrganizeReviewDialog(
+                current,
+                titles = unfiled,
+                leftOver = (sessions.count { it.folder == null && it.summary != null } - current.sumOf { it.sessionIds.size }).coerceAtLeast(0),
+                onApply = { chosen, keep ->
+                    reviewingSuggestions = false
+                    val undo = Organizer.apply(chosen, keep)
+                    keepOrganized = keep
+                    scope.launch {
+                        if (snackbar.showSnackbar("Organized ${sessionCount(undo.sessions)}", actionLabel = "Undo", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) undo.run()
+                    }
+                },
+                onDismiss = { reviewingSuggestions = false },
+            )
+        } ?: run { reviewingSuggestions = false }
+    }
+    if (showFolderSettings) {
+        FolderSettingsDialog(
+            canSuggest = summaryState.modelReady && SummaryController.enabled,
+            keepOrganized = keepOrganized,
+            byCalendar = byCalendar,
+            onSuggest = {
+                showFolderSettings = false
+                Organizer.request()
+            },
+            onKeepOrganized = { on ->
+                keepOrganized = on
+                if (on && !prefs.autoFile) prefs.autoFileSince = System.currentTimeMillis()
+                prefs.autoFile = on
+                SummaryController.schedule()
+            },
+            onByCalendar = { on ->
+                if (!on) {
+                    byCalendar = false
+                    prefs.calendarFolders = false
+                } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED) {
+                    byCalendar = true
+                    prefs.calendarFolders = true
+                } else {
+                    calendarPermission.launch(Manifest.permission.READ_CALENDAR)
+                }
+            },
+            onNewFolder = {
+                showFolderSettings = false
+                creatingFolder = true
+            },
+            onDismiss = { showFolderSettings = false },
+        )
+    }
     moving?.let { s ->
         MoveToFolderDialog(
             current = s.folder,

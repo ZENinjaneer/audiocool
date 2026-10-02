@@ -9,10 +9,12 @@ import android.util.Log
 import androidx.annotation.VisibleForTesting
 import com.kjwindham.audiocool.audio.RecorderController
 import com.kjwindham.audiocool.data.ChapterSummary
+import com.kjwindham.audiocool.data.FolderRepository
 import com.kjwindham.audiocool.data.Recording
 import com.kjwindham.audiocool.data.Session
 import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.data.SessionSummary
+import com.kjwindham.audiocool.data.folderSummaries
 import com.kjwindham.audiocool.transcribe.LiveTranscription
 import com.kjwindham.audiocool.transcribe.TranscriptionController
 import com.kjwindham.audiocool.util.Prefs
@@ -115,10 +117,11 @@ object SummaryController {
             // change ten times a second, nor whether someone is speaking right now.
             combine(
                 SessionRepository.sessions,
+                FolderRepository.folders,
                 RecorderController.state.map { it.status to it.recId }.distinctUntilChanged(),
                 TranscriptionController.state.map { Triple(it.phase, it.current, it.queue.size) }.distinctUntilChanged(),
                 LiveTranscription.state.map { it.recId }.distinctUntilChanged(),
-            ) { _, _, _, _ -> }.collect { schedule() }
+            ) { _, _, _, _, _ -> }.collect { schedule() }
         }
     }
 
@@ -213,6 +216,14 @@ object SummaryController {
 
         class Chapter(override val sessionId: String, val chapter: com.kjwindham.audiocool.summarize.Chapter, val prompt: String, override val basis: String, val all: Set<String>) : Work
         class Whole(override val sessionId: String, val prompt: String, override val basis: String) : Work
+
+        /** Which of [sessionIds] (none in a folder) go together. */
+        class Suggest(val sessionIds: List<String>, val prompt: String, override val basis: String) : Work {
+            override val sessionId = ""
+        }
+
+        /** Which of [folders] the new session belongs in. */
+        class File(override val sessionId: String, val folders: List<String>, val prompt: String, override val basis: String) : Work
     }
 
     private fun work() {
@@ -255,6 +266,7 @@ object SummaryController {
         } catch (e: Throwable) {
             Log.e(TAG, "Couldn't start the summary model", e)
             failed += work.basis
+            if (work is Work.Suggest) Organizer.noneFound()
             _state.update { it.copy(error = "The summary model wouldn't start: ${e.message ?: e.javaClass.simpleName}") }
             return
         }
@@ -280,12 +292,35 @@ object SummaryController {
                         }
                     }
                 }
+                is Work.Suggest -> {
+                    val folders = folderSummaries(SessionRepository.sessions.value, FolderRepository.folders.value)
+                    val suggested = OrganizePrompts.parseSuggestions(model.reply(work.prompt, OrganizePrompts.SUGGEST_TOKENS), work.sessionIds, folders)
+                    prefs.suggestBasis = work.basis
+                    if (suggested.isNullOrEmpty()) Organizer.noneFound() else Organizer.offer(suggested)
+                }
+                is Work.File -> {
+                    val number = OrganizePrompts.parseFile(model.reply(work.prompt, OrganizePrompts.FILE_TOKENS), work.folders.size)
+                    if (number == null) {
+                        failed += work.basis
+                    } else {
+                        prefs.autoFileDone = prefs.autoFileDone + work.sessionId
+                        val session = SessionRepository.get(work.sessionId)
+                        // Unless it was filed meanwhile, by hand.
+                        if (number > 0 && session != null && session.folder == null) {
+                            val folder = work.folders[number - 1]
+                            SessionRepository.moveToFolder(work.sessionId, folder)
+                            Organizer.filed(Organizer.Filed(work.sessionId, folder))
+                        }
+                    }
+                }
             }
             _state.update { it.copy(where = model.where, speed = model.lastSpeed ?: it.speed, done = it.done + 1, error = null) }
         } catch (e: android.os.DeadObjectException) {
+            if (work is Work.Suggest) Organizer.noneFound()
             engineCrashed(e)
         } catch (e: Throwable) {
             Log.e(TAG, "Summarizing failed", e)
+            if (work is Work.Suggest) Organizer.noneFound()
             failed += work.basis
             // A model that's failed may be in a bad state: start afresh next time.
             closeSummarizer()
@@ -365,7 +400,41 @@ object SummaryController {
             report(session, chapters)
             return Work.Whole(session.id, prompt, basis)
         }
-        return null
+        return organizing()
+    }
+
+    /**
+     * With nothing to summarize: a new session to file, if keeping sessions organized; else suggestions
+     * for the sessions in no folder, once a few are waiting (or right away, when asked).
+     */
+    private fun organizing(): Work? {
+        val sessions = SessionRepository.sessions.value
+        val folders = folderSummaries(sessions, FolderRepository.folders.value)
+        if (prefs.autoFile && folders.isNotEmpty()) {
+            val done = prefs.autoFileDone
+            val examples = sessions.filter { it.folder != null }.sortedByDescending { it.createdAt }.groupBy({ it.folder!! }, { it.title })
+            for (s in sessions.sortedByDescending { it.createdAt }) {
+                if (s.folder != null || s.summary == null || s.createdAt < prefs.autoFileSince || s.id in done) continue
+                val prompt = OrganizePrompts.file(s, folders, examples)
+                val basis = SummaryPrompts.basis(prompt)
+                if (basis in failed) continue
+                return Work.File(s.id, folders.map { it.name }, prompt, basis)
+            }
+        }
+        if (Organizer.suggestions.value != null) return null
+        val waiting = sessions.filter { it.folder == null && it.summary != null }.sortedByDescending { it.createdAt }.take(OrganizePrompts.MAX_SESSIONS)
+        val due = if (Organizer.requested) waiting.size >= 2 else waiting.size >= 4 && waiting.size >= prefs.suggestDismissedAt + 3
+        if (!due) {
+            if (Organizer.requested) Organizer.noneFound()
+            return null
+        }
+        val prompt = OrganizePrompts.suggest(waiting, folders)
+        val basis = SummaryPrompts.basis(prompt)
+        if (basis in failed || (basis == prefs.suggestBasis && !Organizer.requested)) {
+            if (Organizer.requested) Organizer.noneFound()
+            return null
+        }
+        return Work.Suggest(waiting.map { it.id }, prompt, basis)
     }
 
     private fun report(session: Session, chapters: List<Chapter>) {
