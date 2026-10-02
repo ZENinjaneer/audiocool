@@ -35,6 +35,8 @@
   your phone. On playback each word lights up as it's said; tap a word to hear it.
 - **Slides become chapters.** Snap a slide and it lands where it was shown. Its text is read, made
   searchable, and used to name the session.
+- **Hands-free slides (beta).** Prop the phone up facing the screen and it photographs each new slide
+  by itself, skipping repeats and keeping one photo per slide as its bullet points appear.
 - **One timeline.** What was said, your notes, ★ marks and photos, in order. Show everything, notes
   with the talk around them, or just your notes.
 - **A waveform to scrub.** Drag through the recording, or tap a marker for a quick preview before

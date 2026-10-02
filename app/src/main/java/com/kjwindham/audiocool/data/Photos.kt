@@ -46,10 +46,44 @@ object Photos {
     fun addTaken(context: Context, sessionId: String, file: File, recId: String?, offsetMs: Long?, onDone: (Boolean) -> Unit = {}) {
         val resolver = context.applicationContext.contentResolver
         scope.launch {
-            val ok = add(resolver, sessionId, Uri.fromFile(file), System.currentTimeMillis(), recId, offsetMs)
+            val ok = add(resolver, sessionId, Uri.fromFile(file), System.currentTimeMillis(), recId, offsetMs) != null
             file.delete()
             withContext(Dispatchers.Main) { onDone(ok) }
         }
+    }
+
+    /** Adds the photo in [file] as [addTaken] does, but here and now; the new note's id, or null if it couldn't be read. */
+    fun addNow(context: Context, sessionId: String, file: File, recId: String?, offsetMs: Long?): String? = try {
+        add(context.applicationContext.contentResolver, sessionId, Uri.fromFile(file), System.currentTimeMillis(), recId, offsetMs)
+    } finally {
+        file.delete()
+    }
+
+    /**
+     * Puts the picture in [file] in place of photo note [noteId]'s: a better picture of the same slide,
+     * keeping its place. Its text is read again. False if the note's gone or [file] isn't a picture.
+     */
+    fun replaceNow(context: Context, sessionId: String, noteId: String, file: File): Boolean {
+        // A new name, so nothing shows the old picture from a cache.
+        val name = "photo-${newId()}.jpg"
+        val target = SessionRepository.photoFile(sessionId, name)
+        val saved = try {
+            runCatching { save(context.applicationContext.contentResolver, Uri.fromFile(file), target) }
+                .onFailure { Log.e(TAG, "Couldn't save the better picture for $noteId", it) }
+                .getOrDefault(false)
+        } finally {
+            file.delete()
+        }
+        if (!saved) return false
+        val old = SessionRepository.replacePhoto(sessionId, noteId, name)
+        if (old == null) {
+            target.delete()
+            return false
+        }
+        Log.i(TAG, "Photo $noteId retaken as $name")
+        SessionRepository.photoFile(sessionId, old).delete()
+        SlideText.photoAdded(sessionId, noteId)
+        return true
     }
 
     /**
@@ -64,7 +98,7 @@ object Photos {
             for (uri in uris) {
                 val takenAt = takenAt(resolver, uri)
                 val link = SessionRepository.get(sessionId)?.let { s -> takenAt?.let { linkFor(s, it) } }
-                if (!add(resolver, sessionId, uri, takenAt ?: System.currentTimeMillis(), link?.first, link?.second)) failed++
+                if (add(resolver, sessionId, uri, takenAt ?: System.currentTimeMillis(), link?.first, link?.second) == null) failed++
             }
             withContext(Dispatchers.Main) { onDone(failed) }
         }
@@ -80,18 +114,18 @@ object Photos {
         return null
     }
 
-    private fun add(resolver: ContentResolver, sessionId: String, source: Uri, createdAt: Long, recId: String?, offsetMs: Long?): Boolean {
+    /** Saves the picture at [source] as a new photo note; its id, or null if it isn't a picture. */
+    private fun add(resolver: ContentResolver, sessionId: String, source: Uri, createdAt: Long, recId: String?, offsetMs: Long?): String? {
         val id = newId()
         val name = "photo-$id.jpg"
         val result = runCatching { save(resolver, source, SessionRepository.photoFile(sessionId, name)) }
         result.exceptionOrNull()?.let { Log.e(TAG, "Couldn't save the photo from $source", it) }
         val saved = result.getOrDefault(false)
         Log.i(TAG, "Photo from $source: ${if (saved) "saved as $name at $offsetMs ms of $recId" else "not saved"}")
-        if (saved) {
-            SessionRepository.addNote(sessionId, Note(id, "", createdAt, recId, offsetMs, photo = name))
-            SlideText.photoAdded(sessionId, id)
-        }
-        return saved
+        if (!saved) return null
+        SessionRepository.addNote(sessionId, Note(id, "", createdAt, recId, offsetMs, photo = name))
+        SlideText.photoAdded(sessionId, id)
+        return id
     }
 
     /** Writes the picture at [source] to [target], upright and at most [MAX_EDGE] px. False if it isn't a picture. */

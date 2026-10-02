@@ -573,6 +573,12 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
                                     },
                                 )
                             }
+                            if (recordingHere) {
+                                DropdownMenuItem(text = { Text("Hands-free slides") }, onClick = {
+                                    showMenu = false
+                                    context.startActivity(Intent(context, CaptureActivity::class.java).setAction(CaptureActivity.ACTION_AUTO_SLIDES))
+                                })
+                            }
                             // Transcribed on the phone before word timings: offer them (never over the desktop's transcript).
                             val untimed = session.recordings.filter { r -> r.transcriptModel == SpeechModel.ID && r.transcript?.any { it.words == null } == true }
                             if (untimed.isNotEmpty() && !recordingHere) {

@@ -12,6 +12,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import com.kjwindham.audiocool.MainActivity
 import com.kjwindham.audiocool.audio.RecorderController
@@ -37,7 +40,7 @@ class CaptureActivity : ComponentActivity() {
         if (savedInstanceState == null && !route(intent)) return
         setContent {
             AudioCoolTheme {
-                CaptureScreen(onDone = ::finish, onOpenApp = ::openApp)
+                CaptureScreen(onDone = ::finish, onOpenApp = ::openApp, autoRequests = autoRequests)
             }
         }
     }
@@ -48,8 +51,22 @@ class CaptureActivity : ComponentActivity() {
         route(intent)
     }
 
-    /** Starts a recording if asked to; goes to the app instead when the phone is unlocked. False if this screen closed. */
+    /** Times hands-free slides was asked for, which turns Auto slides on. */
+    private var autoRequests by mutableIntStateOf(0)
+
+    /**
+     * Starts a recording if asked to; goes to the app instead when the phone is unlocked, unless asked
+     * for hands-free slides. False if this screen closed.
+     */
     private fun route(intent: Intent?): Boolean {
+        if (intent?.action == ACTION_AUTO_SLIDES) {
+            if (RecorderController.state.value.status == RecorderController.Status.IDLE) {
+                finish()
+                return false
+            }
+            autoRequests++
+            return true
+        }
         var sessionId = RecorderController.state.value.sessionId
         if (intent?.action == ACTION_START && RecorderController.state.value.status == RecorderController.Status.IDLE) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -93,5 +110,8 @@ class CaptureActivity : ComponentActivity() {
 
         /** The quick settings tile: start recording into a new session. */
         const val ACTION_START = "com.kjwindham.audiocool.action.QUICK_RECORD"
+
+        /** From the session while it records: the camera saving each new slide by itself. */
+        const val ACTION_AUTO_SLIDES = "com.kjwindham.audiocool.action.AUTO_SLIDES"
     }
 }

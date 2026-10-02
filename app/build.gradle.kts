@@ -58,8 +58,8 @@ android {
         applicationId = "com.kjwindham.audiocool"
         minSdk = 26
         targetSdk = 35
-        versionCode = 18
-        versionName = "2.2"
+        versionCode = 19
+        versionName = "2.3"
         // The speech engine is native code; ship only the 64-bit ARM build every current phone uses.
         ndk {
             abiFilters += listOf("arm64-v8a")

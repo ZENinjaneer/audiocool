@@ -66,6 +66,21 @@ after the paragraph it was written during; photos as chapters; ★ marks.
   photo to use it instead). The grid button on the main screen switches between the list and a
   gallery of thumbnails with each session's name underneath; search results show them too.
 
+## Hands-free slides (beta)
+
+- While recording, ⋮ › **Hands-free slides** (or **Auto slides** on the lock-screen camera) has the
+  camera catch the slides by itself. Prop the phone up facing the screen, zoomed in so the slides fill
+  the picture; each new slide is photographed once it has held still for a moment and lands in the
+  timeline where it went up.
+- Going back to a slide doesn't save it again. When a slide's bullet points appear one at a time, its
+  photo is retaken each time, so you're left with one photo with everything on it; zooming retakes it
+  too. Someone walking past or standing in front of the screen isn't a new slide, and neither is the
+  camera adjusting its exposure or the lights flickering.
+- After 30 seconds untouched the screen goes dark to save the battery, and keeps watching; the first
+  tap only brings it back. It pauses with the recording.
+- It's new: how well it does depends on the room. If it misses slides or saves too many, please open
+  an issue.
+
 ## Live transcription
 
 - While you record, each phrase is transcribed on the phone a moment after it's spoken, and nothing is

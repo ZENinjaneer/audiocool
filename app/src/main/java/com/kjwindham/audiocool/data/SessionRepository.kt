@@ -130,6 +130,24 @@ object SessionRepository {
         if (photo != null) io.launch { photoFile(sessionId, photo).delete() }
     }
 
+    /** Points photo note [noteId] at the picture [name] (a better one of the same thing), to be read again; the one it had, or null if it's gone. */
+    fun replacePhoto(sessionId: String, noteId: String, name: String): String? {
+        var old: String? = null
+        update(sessionId, touch = false) { s ->
+            s.copy(
+                notes = s.notes.map { n ->
+                    if (n.id == noteId && n.photo != null) {
+                        old = n.photo
+                        n.copy(photo = name, photoText = null)
+                    } else {
+                        n
+                    }
+                },
+            )
+        }
+        return old
+    }
+
     /** Saves the text found in a photo note's picture. */
     fun setPhotoText(sessionId: String, noteId: String, text: String) = update(sessionId, touch = false) { s ->
         s.copy(notes = s.notes.map { if (it.id == noteId) it.copy(photoText = text) else it })
