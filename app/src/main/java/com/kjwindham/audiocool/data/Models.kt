@@ -31,11 +31,19 @@ data class Note(
     val photo: String? = null,
     /** The text found in [photo], one line per line; null until it's been read. */
     val photoText: String? = null,
+    /** Said rather than typed (a spoken note). */
+    val spoken: Boolean = false,
 ) {
+    /** A ★ moment, marked without writing anything. */
+    val isMark: Boolean get() = photo == null && text == MARK_TEXT
+
     /** The text in [photo] when there's some worth showing: a stray letter or two read off a picture isn't. */
     val textInPhoto: String?
         get() = photoText?.trim()?.takeIf { text -> text.count { it.isLetterOrDigit() } >= 4 }
 }
+
+/** The text of a ★ mark. */
+const val MARK_TEXT = "★ Marked"
 
 data class Session(
     val id: String,

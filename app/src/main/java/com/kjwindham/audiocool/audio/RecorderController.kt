@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import com.kjwindham.audiocool.data.MARK_TEXT
 import com.kjwindham.audiocool.data.Note
 import com.kjwindham.audiocool.data.Recording
 import com.kjwindham.audiocool.data.SessionRepository
@@ -124,6 +125,7 @@ object RecorderController {
         val rec = Recording(id = newId(), file = file.name, createdAt = System.currentTimeMillis(), durationMs = 0)
         SessionRepository.addRecording(sessionId, rec)
         _state.value = State(Status.RECORDING, sessionId, rec.id)
+        Waveform.liveStart(rec.id)
         app.getSystemService(AudioManager::class.java).registerAudioDeviceCallback(deviceCallback, Handler(Looper.getMainLooper()))
         routeMic()
         startTicker()
@@ -171,6 +173,7 @@ object RecorderController {
         }
         recorder = null
         file = null
+        if (st.sessionId != null) Waveform.liveStop(st.sessionId)
         _state.value = State()
         if (st.sessionId != null && st.recId != null) {
             SessionRepository.setRecordingDuration(st.sessionId, st.recId, duration)
@@ -198,7 +201,7 @@ object RecorderController {
         val st = _state.value
         if (st.status == Status.IDLE || st.sessionId == null || st.recId == null) return
         val at = currentOffsetMs()
-        SessionRepository.addNote(st.sessionId, Note(newId(), "★ Marked", System.currentTimeMillis(), st.recId, at))
+        SessionRepository.addNote(st.sessionId, Note(newId(), MARK_TEXT, System.currentTimeMillis(), st.recId, at))
         _state.update { it.copy(markedAtMs = at) }
     }
 
@@ -260,7 +263,9 @@ object RecorderController {
                 }
                 // Map -50 dBFS..0 dBFS onto 0..1.
                 val level = if (amp <= 0) 0f else ((20 * log10(amp / 32767f) + 50f) / 50f).coerceIn(0f, 1f)
-                _state.update { it.copy(elapsedMs = currentOffsetMs(), level = level) }
+                val offset = currentOffsetMs()
+                if (_state.value.status == Status.RECORDING) Waveform.liveLevel(offset, level)
+                _state.update { it.copy(elapsedMs = offset, level = level) }
                 delay(100)
             }
         }

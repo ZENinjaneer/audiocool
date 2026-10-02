@@ -11,7 +11,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -72,7 +71,8 @@ class MainActivity : ComponentActivity() {
 private fun AppRoot(requested: MutableState<String?>) {
     val context = LocalContext.current
     var openId by rememberSaveable { mutableStateOf<String?>(null) }
-    var openTab by rememberSaveable { mutableIntStateOf(0) }
+    // Opened from something said that a search found: show what was said, whatever view was picked last.
+    var openOnSpeech by rememberSaveable { mutableStateOf(false) }
     // Kept here so the search is still there when you come back from a result.
     var query by rememberSaveable { mutableStateOf("") }
     val pending = requested.value
@@ -90,22 +90,22 @@ private fun AppRoot(requested: MutableState<String?>) {
             query = query,
             onQueryChange = { query = it },
             onOpen = {
-                openTab = 0
+                openOnSpeech = false
                 openId = it
             },
             onOpenHit = { hit ->
                 playHit(context, hit)
-                openTab = if (hit.kind == HitKind.SPEECH) 1 else 0
+                openOnSpeech = hit.kind == HitKind.SPEECH
                 openId = hit.sessionId
             },
             onCreate = {
-                openTab = 0
+                openOnSpeech = false
                 openId = SessionRepository.create(defaultSessionTitle()).id
             },
         )
     } else {
         BackHandler { openId = null }
-        SessionScreen(session = open, onBack = { openId = null }, initialTab = openTab)
+        SessionScreen(session = open, onBack = { openId = null }, showSpeech = openOnSpeech)
     }
 }
 

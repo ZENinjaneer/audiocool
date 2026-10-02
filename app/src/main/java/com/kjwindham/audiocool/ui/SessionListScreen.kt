@@ -484,7 +484,7 @@ private fun SearchResults(
 }
 
 @Composable
-private fun HitRow(session: Session, hit: SearchHit, onOpenHit: (SearchHit) -> Unit) {
+internal fun HitRow(session: Session, hit: SearchHit, onOpenHit: (SearchHit) -> Unit) {
     val label = hit.atMs?.let { timeLabel(session, hit.recId, it) }
     Row(
         Modifier.fillMaxWidth().clickable { onOpenHit(hit) }.padding(horizontal = 16.dp, vertical = 10.dp),

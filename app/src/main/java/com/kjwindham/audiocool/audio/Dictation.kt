@@ -158,7 +158,7 @@ object Dictation {
         worker.execute {
             val text = runCatching { transcribe(app, samples) }.getOrDefault("").trim()
             if (text.isNotEmpty()) {
-                SessionRepository.addNote(t.sessionId, Note(newId(), text, System.currentTimeMillis(), t.recId, t.offsetMs))
+                SessionRepository.addNote(t.sessionId, Note(newId(), text, System.currentTimeMillis(), t.recId, t.offsetMs, spoken = true))
             }
             _state.update { it.copy(transcribing = false, problem = if (text.isEmpty()) "Didn't catch that. Try again, a little closer to the mic." else it.problem) }
         }

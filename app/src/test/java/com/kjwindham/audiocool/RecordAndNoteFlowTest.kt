@@ -142,7 +142,8 @@ class RecordAndNoteFlowTest {
         compose.onNodeWithText("Show all").performClick()
         compose.onNodeWithText("Show less").assertIsDisplayed()
 
-        // Tapping the picture (its text expands or shrinks instead) shows it full screen, with a way to hear what was being said.
+        // While recording, tapping the picture (not its text, which expands or shrinks) shows it full screen,
+        // with a way to hear what was being said.
         compose.onAllNodesWithContentDescription("Photo", useUnmergedTree = true).onFirst().performClick()
         compose.onNodeWithText("Play from", substring = true).assertIsDisplayed()
         compose.onNodeWithContentDescription("Close").performClick()
@@ -297,19 +298,25 @@ class RecordAndNoteFlowTest {
         compose.onNodeWithText("2 results").assertIsDisplayed()
         screenshot("6-search")
 
-        // Tapping what was said opens the transcript there and plays from just before it.
+        // Tapping what was said opens the session's timeline there, lit up, and plays from just before it.
         compose.onNodeWithText("The Krebs cycle happens in the matrix.").performClick()
         compose.waitForIdle()
         assertTrue(PlayerController.state.value.isPlaying)
         assertEquals(29_700L, PlayerController.state.value.positionMs)
         compose.onNode(hasText("The Krebs cycle happens in the matrix.") and isSelected()).assertExists()
+        // The note written while it was said comes right after it.
+        compose.onNodeWithText("Krebs = energy").assertIsDisplayed()
         screenshot("7-transcript")
 
-        // The transcript has its own search.
+        // The session has its own search, over notes, photos and what was said.
+        compose.onNodeWithContentDescription("Search this session").performClick()
         compose.onAllNodes(hasSetTextAction())[0].performTextInput("powerhouse")
         compose.waitForIdle()
         compose.onNodeWithText("1 match").assertIsDisplayed()
         compose.onNodeWithText("The Krebs cycle happens in the matrix.").assertDoesNotExist()
+        compose.onNodeWithText("Mitochondria are the powerhouse of the cell.").performClick()
+        compose.waitForIdle()
+        assertEquals(1_700L, PlayerController.state.value.positionMs)
     }
 
     @Test
@@ -320,7 +327,6 @@ class RecordAndNoteFlowTest {
         SessionRepository.setTranscript(session.id, "r1", listOf(TranscriptSegment(1_000, 3_000, "old words")))
         compose.waitForIdle()
         compose.onNodeWithText("Chem").performClick()
-        compose.onNodeWithText("Transcript").performClick()
         compose.onNodeWithText("Made with the older, less accurate speech model.").assertIsDisplayed()
 
         compose.onNodeWithText("Transcribe again").performClick()
@@ -335,7 +341,6 @@ class RecordAndNoteFlowTest {
         SessionRepository.addRecording(session.id, Recording("r1", "recording-1.m4a", 1_000L, 60_000))
         compose.waitForIdle()
         compose.onNodeWithText("History").performClick()
-        compose.onNodeWithText("Transcript").performClick()
         compose.onNodeWithText("Not transcribed yet").assertIsDisplayed()
 
         compose.onNodeWithText("Transcribe").performClick()
@@ -368,8 +373,9 @@ class RecordAndNoteFlowTest {
         compose.onNodeWithText("Welcome to the first lecture.").assertIsDisplayed()
         typeNote("First point")
         compose.onNodeWithText("First point").assertIsDisplayed()
-        // The note's timestamp chip, plus the recording timer, which also reads 00:12.
-        compose.onAllNodesWithText("00:12").assertCountEquals(2)
+        // Linked to 00:12, where the recording timer is too.
+        compose.onNodeWithText("Note · 00:12").assertIsDisplayed()
+        compose.onNodeWithText("00:12").assertIsDisplayed()
 
         // Paused time isn't in the audio file, so it mustn't move the timestamps either.
         compose.onNodeWithContentDescription("Pause").performClick()

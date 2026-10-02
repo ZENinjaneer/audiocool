@@ -39,6 +39,7 @@ object SessionJson {
                     }
                     n.photo?.let { put("photo", it) }
                     n.photoText?.let { put("photoText", it) }
+                    if (n.spoken) put("spoken", true)
                 })
             }
         })
@@ -80,6 +81,7 @@ object SessionJson {
                     offsetMs = if (n.has("offsetMs")) n.getLong("offsetMs") else null,
                     photo = if (n.has("photo")) n.getString("photo") else null,
                     photoText = if (n.has("photoText")) n.getString("photoText") else null,
+                    spoken = n.optBoolean("spoken"),
                 )
             },
         )

@@ -11,6 +11,11 @@ class Prefs(context: Context) {
         get() = sp.getInt("lead_in_seconds", 3)
         set(value) = sp.edit { putInt("lead_in_seconds", value) }
 
+    /** How much of what was said a session's timeline shows: a [com.kjwindham.audiocool.data.TimelineMode] name. */
+    var timelineMode: String
+        get() = sp.getString("timeline_mode", "EVERYTHING").orEmpty()
+        set(value) = sp.edit { putString("timeline_mode", value) }
+
     /** Show sessions on the main screen as a grid of thumbnails rather than a list. */
     var galleryView: Boolean
         get() = sp.getBoolean("gallery_view", false)

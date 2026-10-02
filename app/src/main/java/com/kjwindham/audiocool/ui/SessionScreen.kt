@@ -2,51 +2,43 @@ package com.kjwindham.audiocool.ui
 
 import android.Manifest
 import android.content.ActivityNotFoundException
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import android.os.Build
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
@@ -57,7 +49,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -65,14 +56,9 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.SliderState
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -89,58 +75,72 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.min
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kjwindham.audiocool.audio.Dictation
 import com.kjwindham.audiocool.audio.PlayerController
 import com.kjwindham.audiocool.audio.RecorderController
+import com.kjwindham.audiocool.audio.Waveform
+import com.kjwindham.audiocool.data.MARK_TEXT
 import com.kjwindham.audiocool.data.Note
 import com.kjwindham.audiocool.data.NoteFocus
 import com.kjwindham.audiocool.data.Photos
 import com.kjwindham.audiocool.data.Recording
 import com.kjwindham.audiocool.data.Session
 import com.kjwindham.audiocool.data.SessionRepository
-import com.kjwindham.audiocool.data.TranscriptSegment
+import com.kjwindham.audiocool.data.TimelineMode
+import com.kjwindham.audiocool.data.TimelineRow
 import com.kjwindham.audiocool.data.highlightedNoteId
 import com.kjwindham.audiocool.data.newId
+import com.kjwindham.audiocool.data.noteKey
 import com.kjwindham.audiocool.data.playbackStartFor
+import com.kjwindham.audiocool.data.playingSpeechKey
+import com.kjwindham.audiocool.data.timelineRows
 import com.kjwindham.audiocool.desktop.DesktopSync
+import com.kjwindham.audiocool.search.HitKind
+import com.kjwindham.audiocool.search.SearchHit
+import com.kjwindham.audiocool.search.searchSession
 import com.kjwindham.audiocool.transcribe.LiveTranscription
 import com.kjwindham.audiocool.transcribe.TranscriptionController
 import com.kjwindham.audiocool.util.Prefs
+import com.kjwindham.audiocool.util.defaultSessionTitle
+import com.kjwindham.audiocool.util.formatDate
 import com.kjwindham.audiocool.util.formatTime
 import com.kjwindham.audiocool.util.isEnterKeystroke
 import com.kjwindham.audiocool.util.noteLabel
 import com.kjwindham.audiocool.util.removeEnter
 import com.kjwindham.audiocool.util.shareSession
 import java.io.File
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** A moment in one of the session's recordings. */
 private data class Stamp(val recId: String, val offsetMs: Long)
 
-private val Speeds = listOf(1f, 1.25f, 1.5f, 2f, 0.75f)
-
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * A session: everything in it on one timeline (notes, photos and what was said), the recording or
+ * playback controls, and the note box. [showSpeech] opens it on the full view whatever was picked
+ * last, as when coming from something said that a search found.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
+fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = false) {
     val context = LocalContext.current
     val rec by RecorderController.state.collectAsStateWithLifecycle()
     val player by PlayerController.state.collectAsStateWithLifecycle()
@@ -149,6 +149,7 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
     val desktop by DesktopSync.pairing.collectAsStateWithLifecycle()
     val desktopProgress by DesktopSync.progress.collectAsStateWithLifecycle()
     val dictation by Dictation.state.collectAsStateWithLifecycle()
+    val waveforms by Waveform.levels.collectAsStateWithLifecycle()
     val prefs = remember { Prefs(context) }
     var leadInSec by remember { mutableIntStateOf(prefs.leadInSeconds) }
     val snackbar = remember { SnackbarHostState() }
@@ -175,7 +176,6 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
     var confirmDelete by remember { mutableStateOf(false) }
     var pickLeadIn by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Note?>(null) }
-    var tab by rememberSaveable(session.id) { mutableIntStateOf(initialTab) }
     // Recordings waiting on the user to OK the one-time model download.
     var awaitingDownload by remember { mutableStateOf<List<String>?>(null) }
     var confirmLiveDownload by remember { mutableStateOf(false) }
@@ -185,6 +185,16 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
     var capturePath by rememberSaveable(session.id) { mutableStateOf<String?>(null) }
     var captureRec by rememberSaveable(session.id) { mutableStateOf<String?>(null) }
     var captureMs by rememberSaveable(session.id) { mutableLongStateOf(-1L) }
+
+    // The timeline: how much of what was said it shows, searching it, and the scrubber's preview.
+    var mode by rememberSaveable(session.id) {
+        mutableStateOf(if (showSpeech) TimelineMode.EVERYTHING else runCatching { TimelineMode.valueOf(prefs.timelineMode) }.getOrDefault(TimelineMode.EVERYTHING))
+    }
+    var searching by rememberSaveable(session.id) { mutableStateOf(false) }
+    var query by rememberSaveable(session.id) { mutableStateOf("") }
+    var peekId by remember { mutableStateOf<String?>(null) }
+    var scrubMs by remember { mutableStateOf<Long?>(null) }
+    var jumpTo by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(rec.error) {
         rec.error?.let {
@@ -206,6 +216,14 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
     }
     // Leaving the screen ends a spoken note in progress.
     DisposableEffect(Unit) { onDispose { Dictation.stop(context) } }
+    LaunchedEffect(selected?.id) { selected?.let { Waveform.request(session.id, it) } }
+    // A preview is a quick look; it goes away by itself.
+    LaunchedEffect(peekId) {
+        if (peekId != null) {
+            delay(8_000)
+            peekId = null
+        }
+    }
 
     fun toast(message: String) {
         scope.launch { snackbar.showSnackbar(message) }
@@ -255,16 +273,29 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
         }
     }
 
+    fun canPlay(): Boolean {
+        if (rec.status == RecorderController.Status.IDLE) return true
+        toast("Stop recording to play back")
+        return false
+    }
+
     fun playNote(note: Note) {
         val r = session.recording(note.recId) ?: return
         val offset = note.offsetMs ?: return
-        if (rec.status != RecorderController.Status.IDLE) {
-            toast("Stop recording to play back")
-            return
-        }
+        if (!canPlay()) return
+        peekId = null
         selectedRecId = r.id
         val start = playbackStartFor(note, session.notes, leadInSec * 1000L)
         PlayerController.playFrom(session.id, r, start, NoteFocus(note.id, r.id, fromMs = start, untilMs = offset))
+    }
+
+    fun playFrom(recId: String?, atMs: Long) {
+        val r = session.recording(recId) ?: return
+        if (!canPlay()) return
+        peekId = null
+        selectedRecId = r.id
+        // A moment early, so the first word isn't clipped.
+        PlayerController.playFrom(session.id, r, (atMs - 300).coerceAtLeast(0L))
     }
 
     fun startRecording() {
@@ -336,15 +367,39 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
         }
     }
 
-    fun playSegment(recording: Recording, segment: TranscriptSegment) {
-        if (rec.status != RecorderController.Status.IDLE) {
-            toast("Stop recording to play back")
-            return
-        }
-        selectedRecId = recording.id
-        // A moment early, so the first word isn't clipped.
-        PlayerController.playFrom(session.id, recording, (segment.startMs - 300).coerceAtLeast(0L))
+    fun pickMode(m: TimelineMode) {
+        mode = m
+        prefs.timelineMode = m.name
     }
+
+    // What the timeline shows, and where playback (or the scrubber's finger) is on it.
+    val rows = remember(session, mode) { timelineRows(session, mode) }
+    val hasSpeech = session.recordings.any { !it.transcript.isNullOrEmpty() }
+    val ordered = remember(session.notes, session.recordings) { session.orderedNotes() }
+    val engagedHere = selected != null && playerHere && player.recId == selected.id && player.engaged
+    val position = scrubMs ?: if (engagedHere) player.positionMs else null
+    val focusId = position?.let { highlightedNoteId(ordered, selected?.id, it, if (scrubMs == null) player.focus else null) }
+    val playingKey = position?.let { playingSpeechKey(rows, selected?.id, it) }
+    val followKey = run {
+        val focusKey = focusId?.let(::noteKey)
+        if (mode != TimelineMode.EVERYTHING) return@run focusKey
+        // Keep what's playing in view, except that a photo opens up just above the paragraph after
+        // it: then follow the photo, so both show.
+        val focusIndex = rows.indexOfFirst { it.key == focusKey }
+        val photoFirst = focusIndex >= 0 && rows[focusIndex] is TimelineRow.Photo && rows.getOrNull(focusIndex + 1)?.key == playingKey
+        if (photoFirst) focusKey else playingKey ?: focusKey
+    }
+    val follow = scrubMs != null || (engagedHere && player.isPlaying)
+    // Keep a note you just added in view.
+    val newestId = session.notes.maxByOrNull { it.createdAt }?.id
+    var seenNewest by remember(session.id) { mutableStateOf(newestId) }
+    LaunchedEffect(newestId) {
+        if (newestId != null && newestId != seenNewest) jumpTo = noteKey(newestId)
+        seenNewest = newestId
+    }
+    val imeVisible = WindowInsets.isImeVisible
+    // Kept between playback ticks, so the scrubber's markers aren't rebuilt ten times a second.
+    val markers = remember(session.notes, selected?.id) { session.notes.filter { it.recId == selected?.id && it.offsetMs != null } }
 
     Scaffold(
         topBar = {
@@ -353,14 +408,24 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
                 title = {
-                    Text(
-                        session.title,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.clickable { renaming = true },
-                    )
+                    Column(Modifier.clickable(onClickLabel = "Rename") { renaming = true }) {
+                        Text(session.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            sessionSummary(session),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 },
                 actions = {
+                    IconButton(onClick = {
+                        searching = !searching
+                        if (!searching) query = ""
+                    }) {
+                        Icon(Icons.Filled.Search, contentDescription = if (searching) "Close search" else "Search this session")
+                    }
                     IconButton(onClick = { shareSession(context, session) }) {
                         Icon(Icons.Filled.Share, contentDescription = "Share notes and audio")
                     }
@@ -381,7 +446,6 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
                                     enabled = !recordingHere && session.recordings.any { it.durationMs > 0 },
                                     onClick = {
                                         showMenu = false
-                                        tab = 1
                                         DesktopSync.send(session.id)
                                     },
                                 )
@@ -406,65 +470,140 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    when {
-                        recordingHere -> RecordingControls(
+            val topPanel: (@Composable () -> Unit)? = when {
+                recordingHere -> {
+                    {
+                        RecordingControls(
                             rec,
-                            liveLine = session.recording(rec.recId)?.transcript?.lastOrNull()?.text,
+                            liveLine = if (mode == TimelineMode.EVERYTHING) null else session.recording(rec.recId)?.transcript?.lastOrNull()?.text,
                             transcription = transcription,
                             onDownloadModel = { confirmLiveDownload = true },
                         )
-                        recordingElsewhere -> Text(
-                            "Recording in another session. Stop it there to record or play here.",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        selected == null -> StartRecordingPrompt(onRecord = ::onRecord)
-                        else -> PlayerControls(
-                            session = session,
-                            player = player,
-                            playable = playable,
-                            selected = selected,
-                            noteOffsets = session.notes.filter { it.recId == selected.id }.mapNotNull { it.offsetMs },
-                            onSelect = { selectedRecId = it },
-                            onRecord = ::onRecord,
-                            ensureLoaded = ::ensureLoaded,
-                        )
                     }
                 }
+                recordingElsewhere -> {
+                    { Text("Recording in another session. Stop it there to record or play here.", style = MaterialTheme.typography.bodyMedium) }
+                }
+                selected == null -> {
+                    { StartRecordingPrompt(onRecord = ::onRecord) }
+                }
+                else -> null
             }
-            TabRow(selectedTabIndex = tab) {
-                Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Notes") })
-                Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Transcript") })
+            topPanel?.let { panel ->
+                Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) { panel() }
+                }
             }
-            if (tab == 0) {
-                NotesList(
+            if (searching) {
+                SearchField(query, onQueryChange = { query = it }, onClose = {
+                    searching = false
+                    query = ""
+                })
+            } else if (hasSpeech && !imeVisible) {
+                ModeSwitch(mode, ::pickMode)
+            }
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                if (searching) {
+                    SessionSearch(
+                        session = session,
+                        query = query,
+                        onOpen = { hit ->
+                            val note = hit.noteId?.let { id -> session.notes.firstOrNull { it.id == id } }
+                            when {
+                                note != null && note.offsetMs != null && session.recording(note.recId) != null -> playNote(note)
+                                note?.photo != null -> viewing = note.id
+                                note != null -> editing = note
+                                hit.atMs != null -> playFrom(hit.recId, hit.atMs)
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    TimelinePane(
+                        session = session,
+                        rows = rows,
+                        playingKey = playingKey,
+                        focusId = focusId,
+                        peekId = peekId,
+                        followKey = followKey,
+                        follow = follow,
+                        engaged = position != null,
+                        canPlay = rec.status == RecorderController.Status.IDLE,
+                        liveTail = recordingHere,
+                        jumpTo = jumpTo,
+                        onJumpDone = { jumpTo = null },
+                        header = {
+                            TranscriptStatus(
+                                session = session,
+                                transcription = transcription,
+                                live = live,
+                                desktopProgress = desktopProgress[session.id],
+                                recordingHere = recordingHere,
+                                onTranscribe = { transcribe(session.recordings.filter { it.durationMs > 0 && it.transcript == null }.map { it.id }) },
+                                onRetranscribe = ::transcribe,
+                            )
+                        },
+                        empty = when {
+                            recordingHere && canDictate -> "Type below, or hold the mic and say it. Each note is linked to this moment in the recording."
+                            recordingHere -> "Type below. Each note is linked to this moment in the recording."
+                            session.recordings.isEmpty() -> "Record something, and your notes, photos and what was said line up here."
+                            hasSpeech && mode == TimelineMode.NOTES -> "No notes yet. Everything shows what was said."
+                            else -> "No notes yet."
+                        },
+                        onPlaySpeech = { playFrom(it.recId, it.startMs) },
+                        onPlayNote = ::playNote,
+                        onOpenPhoto = { viewing = it.id },
+                        onEdit = { editing = it },
+                        onFold = {
+                            pickMode(TimelineMode.EVERYTHING)
+                            jumpTo = it.firstKey
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                val peekNote = peekId?.let { id -> session.notes.firstOrNull { it.id == id } }
+                if (peekNote != null && selected != null) {
+                    val duration = (if (playerHere && player.recId == selected.id && player.durationMs > 0) player.durationMs else selected.durationMs)
+                        .coerceAtLeast(1L)
+                    val cardWidth = min(300.dp, maxWidth - 24.dp)
+                    val anchor = markerX((peekNote.offsetMs ?: 0L).toFloat() / duration, maxWidth)
+                    val x = (anchor - cardWidth / 2).coerceIn(12.dp, maxWidth - cardWidth - 12.dp)
+                    PeekCard(
+                        session = session,
+                        note = peekNote,
+                        photoNumber = ordered.filter { it.photo != null }.indexOfFirst { it.id == peekNote.id } + 1,
+                        context = peekNote.offsetMs?.let { saidAround(session.recording(peekNote.recId), it) },
+                        onPlay = { playNote(peekNote) },
+                        onClose = { peekId = null },
+                        modifier = Modifier.align(Alignment.BottomStart).offset(x = x, y = (-10).dp).width(cardWidth),
+                    )
+                }
+            }
+            if (selected != null && !recordingHere && !recordingElsewhere && !imeVisible) {
+                Scrubber(
                     session = session,
+                    rec = selected,
+                    playable = playable,
                     player = player,
-                    recordingHere = recordingHere,
-                    canDictate = canDictate,
-                    modifier = Modifier.weight(1f),
-                    onTap = { note ->
-                        when {
-                            note.photo != null -> viewing = note.id
-                            note.offsetMs != null -> playNote(note)
-                            else -> editing = note
-                        }
+                    levels = waveforms[selected.id],
+                    markers = markers,
+                    focusId = focusId,
+                    peekId = peekId,
+                    scrubMs = scrubMs,
+                    onScrub = {
+                        scrubMs = it
+                        if (it != null) peekId = null
                     },
-                    onEdit = { editing = it },
-                )
-            } else {
-                TranscriptPane(
-                    session = session,
-                    player = player,
-                    transcription = transcription,
-                    live = live,
-                    desktopProgress = desktopProgress[session.id],
-                    recordingHere = recordingHere,
-                    onTranscribe = { transcribe(session.recordings.filter { it.durationMs > 0 && it.transcript == null }.map { it.id }) },
-                    onRetranscribe = ::transcribe,
-                    onPlay = ::playSegment,
-                    modifier = Modifier.weight(1f),
+                    onSeek = { if (ensureLoaded()) PlayerController.seekTo(it) },
+                    onPeek = { peekId = it },
+                    onSelectRec = {
+                        selectedRecId = it
+                        peekId = null
+                    },
+                    onToggle = { if (ensureLoaded()) PlayerController.toggle() },
+                    onSkip = { if (ensureLoaded()) PlayerController.skipBy(it) },
+                    onSpeed = PlayerController::setSpeed,
+                    onRecordMore = ::onRecord,
                 )
             }
             Composer(
@@ -475,7 +614,7 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
                 canDictate = canDictate,
                 onDraftChange = ::onDraftChange,
                 onSend = ::submitDraft,
-                onMark = { addNote("★ Marked", currentStamp()) },
+                onMark = { addNote(MARK_TEXT, currentStamp()) },
                 onPhoto = ::takePhoto,
                 onDictateStart = {
                     val stamp = currentStamp()
@@ -558,15 +697,126 @@ fun SessionScreen(session: Session, onBack: () -> Unit, initialTab: Int = 0) {
     }
     editing?.let { note ->
         TextInputDialog(
-            title = if (note.photo != null) "Caption" else "Edit note",
-            initial = note.text,
+            title = when {
+                note.photo != null -> "Caption"
+                note.isMark -> "Note at this mark"
+                else -> "Edit note"
+            },
+            initial = if (note.isMark) "" else note.text,
             singleLine = false,
             onConfirm = {
-                SessionRepository.editNote(session.id, note.id, it)
+                // An empty note at a mark keeps it a mark.
+                SessionRepository.editNote(session.id, note.id, if (note.isMark && it.isBlank()) MARK_TEXT else it)
                 editing = null
             },
             onDismiss = { editing = null },
         )
+    }
+}
+
+/** "Oct 1, 2026 · 2:04 PM · 06:12 · 3 notes · 4 photos": the date only when the title isn't already it. */
+fun sessionSummary(session: Session): String {
+    val notes = session.notes.count { it.photo == null }
+    val photos = session.notes.count { it.photo != null }
+    return listOfNotNull(
+        formatDate(session.createdAt).takeIf { session.title != defaultSessionTitle(session.createdAt) },
+        formatTime(session.totalDurationMs).takeIf { session.totalDurationMs > 0 },
+        (if (notes == 1) "1 note" else "$notes notes").takeIf { notes > 0 },
+        (if (photos == 1) "1 photo" else "$photos photos").takeIf { photos > 0 },
+    ).joinToString(" · ").ifEmpty { "Nothing recorded yet" }
+}
+
+/** What was being said just before and at [atMs] in [rec]: a mark's context. */
+private fun saidAround(rec: Recording?, atMs: Long): String? =
+    rec?.transcript.orEmpty()
+        .filter { it.endMs >= atMs - 8_000 && it.startMs <= atMs + 1_000 }
+        .joinToString(" ") { it.text.trim() }
+        .ifBlank { null }
+
+/** Everything, Notes + context, Notes only: how much of what was said the timeline shows. */
+@Composable
+private fun ModeSwitch(mode: TimelineMode, onPick: (TimelineMode) -> Unit) {
+    val options = listOf(TimelineMode.EVERYTHING to "Everything", TimelineMode.CONTEXT to "Notes + context", TimelineMode.NOTES to "Notes only")
+    val colors = timelineColors()
+    Box(Modifier.fillMaxWidth().background(colors.page).padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 6.dp)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            for ((value, label) in options) {
+                val on = value == mode
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .then(if (on) Modifier.shadow(2.dp, CircleShape) else Modifier)
+                        .clip(CircleShape)
+                        .background(if (on) colors.picked else Color.Transparent)
+                        .semantics {
+                            role = Role.Tab
+                            selected = on
+                        }
+                        .clickable { onPick(value) }
+                        .padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                        color = if (on) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchField(query: String, onQueryChange: (String) -> Unit, onClose: () -> Unit) {
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).focusRequester(focus),
+        placeholder = { Text("Search notes, slides and what was said") },
+        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+        trailingIcon = { IconButton(onClick = onClose) { Icon(Icons.Filled.Close, contentDescription = "Close search") } },
+        singleLine = true,
+        shape = RoundedCornerShape(24.dp),
+    )
+}
+
+/** What in the session matches the search: notes, text on photos and things said, in timeline order. */
+@Composable
+private fun SessionSearch(session: Session, query: String, onOpen: (SearchHit) -> Unit, modifier: Modifier) {
+    val hits = remember(session, query) { searchSession(session, query) }
+    LazyColumn(modifier) {
+        when {
+            query.isBlank() -> item { Hint("Find notes, text on photos and what was said in this session.") }
+            hits.isEmpty() -> item { Hint("Nothing here matches “${query.trim()}”.") }
+            else -> {
+                item {
+                    Text(
+                        if (hits.size == 1) "1 match" else "${hits.size} matches",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp),
+                    )
+                }
+                items(hits, key = { hit ->
+                    when (hit.kind) {
+                        HitKind.NOTE -> "note:${hit.noteId}"
+                        HitKind.PHOTO -> "photo:${hit.noteId}"
+                        HitKind.SPEECH -> "said:${hit.recId}:${hit.atMs}"
+                    }
+                }) { hit -> HitRow(session, hit, onOpen) }
+            }
+        }
     }
 }
 
@@ -678,347 +928,6 @@ private fun StartRecordingPrompt(onRecord: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun PlayerControls(
-    session: Session,
-    player: PlayerController.State,
-    playable: List<Recording>,
-    selected: Recording,
-    noteOffsets: List<Long>,
-    onSelect: (String) -> Unit,
-    onRecord: () -> Unit,
-    ensureLoaded: () -> Boolean,
-) {
-    val loaded = player.sessionId == session.id && player.recId == selected.id
-    val position = if (loaded) player.positionMs else 0L
-    val duration = (if (loaded && player.durationMs > 0) player.durationMs else selected.durationMs).coerceAtLeast(1L)
-    var dragMs by remember(selected.id) { mutableStateOf<Float?>(null) }
-
-    if (playable.size > 1) {
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            playable.forEach { r ->
-                FilterChip(
-                    selected = r.id == selected.id,
-                    onClick = { onSelect(r.id) },
-                    label = { Text("Rec ${session.recordingNumber(r.id)} · ${formatTime(r.durationMs)}") },
-                )
-            }
-        }
-    }
-    Slider(
-        value = (dragMs ?: position.toFloat()).coerceIn(0f, duration.toFloat()),
-        onValueChange = { dragMs = it },
-        onValueChangeFinished = {
-            dragMs?.let { if (ensureLoaded()) PlayerController.seekTo(it.toLong()) }
-            dragMs = null
-        },
-        valueRange = 0f..duration.toFloat(),
-        track = { state -> NoteMarkerTrack(state, noteOffsets.map { (it.toFloat() / duration).coerceIn(0f, 1f) }) },
-    )
-    Row(Modifier.fillMaxWidth()) {
-        val timeStyle = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum")
-        Text(formatTime(dragMs?.toLong() ?: position), style = timeStyle)
-        Spacer(Modifier.weight(1f))
-        Text(formatTime(duration), style = timeStyle)
-    }
-    Row(
-        Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        TextButton(onClick = { PlayerController.setSpeed(Speeds[(Speeds.indexOf(player.speed) + 1) % Speeds.size]) }) {
-            Text(speedLabel(player.speed))
-        }
-        SkipButton(back = true) { if (ensureLoaded()) PlayerController.skipBy(-10_000) }
-        FilledIconButton(onClick = { if (ensureLoaded()) PlayerController.toggle() }, modifier = Modifier.size(56.dp)) {
-            val playing = loaded && player.isPlaying
-            Icon(
-                if (playing) AppIcons.Pause else Icons.Filled.PlayArrow,
-                contentDescription = if (playing) "Pause" else "Play",
-                modifier = Modifier.size(32.dp),
-            )
-        }
-        SkipButton(back = false) { if (ensureLoaded()) PlayerController.skipBy(10_000) }
-        IconButton(onClick = onRecord) {
-            Icon(AppIcons.Mic, contentDescription = "Record more", tint = RecordRed)
-        }
-    }
-}
-
-/** The standard slider track with a small pill wherever a note was taken. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun NoteMarkerTrack(state: SliderState, markers: List<Float>) {
-    val colors = SliderDefaults.colors()
-    SliderDefaults.Track(
-        sliderState = state,
-        colors = colors,
-        modifier = Modifier.drawWithContent {
-            drawContent()
-            val range = state.valueRange.endInclusive - state.valueRange.start
-            val played = if (range > 0f) (state.value - state.valueRange.start) / range else 0f
-            val pill = Size(3.dp.toPx(), 10.dp.toPx())
-            // Keep end-of-recording notes inside the track rather than half off it.
-            val inset = 4.dp.toPx()
-            for (fraction in markers) {
-                val x = (size.width * fraction).coerceIn(inset, size.width - inset)
-                drawRoundRect(
-                    color = if (fraction <= played) colors.activeTickColor else colors.inactiveTickColor,
-                    topLeft = Offset(x - pill.width / 2, (size.height - pill.height) / 2),
-                    size = pill,
-                    cornerRadius = CornerRadius(pill.width / 2),
-                )
-            }
-        },
-    )
-}
-
-private fun speedLabel(speed: Float): String =
-    (if (speed == speed.toInt().toFloat()) speed.toInt().toString() else speed.toString()) + "×"
-
-@Composable
-private fun SkipButton(back: Boolean, onClick: () -> Unit) {
-    IconButton(onClick = onClick) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(
-                AppIcons.Replay,
-                contentDescription = if (back) "Back 10 seconds" else "Forward 10 seconds",
-                modifier = Modifier.size(30.dp).graphicsLayer { if (!back) scaleX = -1f },
-            )
-            Text("10", fontSize = 9.sp, modifier = Modifier.padding(top = 3.dp))
-        }
-    }
-}
-
-@Composable
-private fun NotesList(
-    session: Session,
-    player: PlayerController.State,
-    recordingHere: Boolean,
-    canDictate: Boolean,
-    modifier: Modifier,
-    onTap: (Note) -> Unit,
-    onEdit: (Note) -> Unit,
-) {
-    val notes = remember(session.notes, session.recordings) { session.orderedNotes() }
-    val thumbnailId = session.thumbnailNote()?.id
-    val playerHere = player.sessionId == session.id && player.recId != null
-    val currentId = if (playerHere && player.engaged) {
-        highlightedNoteId(notes, player.recId, player.positionMs, player.focus)
-    } else {
-        null
-    }
-    val listState = rememberLazyListState()
-
-    // Keep the note you just added in view.
-    val newestId = notes.maxByOrNull { it.createdAt }?.id
-    LaunchedEffect(newestId) {
-        val i = notes.indexOfFirst { it.id == newestId }
-        if (i >= 0) listState.animateScrollToItem(i)
-    }
-    // Follow along during playback.
-    LaunchedEffect(currentId) {
-        if (!player.isPlaying || currentId == null) return@LaunchedEffect
-        val i = notes.indexOfFirst { it.id == currentId }
-        val layout = listState.layoutInfo
-        val item = layout.visibleItemsInfo.firstOrNull { it.index == i }
-        val fullyVisible = item != null && item.offset >= layout.viewportStartOffset &&
-            item.offset + item.size <= layout.viewportEndOffset
-        if (i >= 0 && !fullyVisible) listState.animateScrollToItem((i - 1).coerceAtLeast(0))
-    }
-
-    if (notes.isEmpty()) {
-        Box(modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-            Text(
-                when {
-                    !recordingHere -> "No notes yet."
-                    canDictate -> "Type below, or hold the mic and say it. Each note is linked to this moment in the recording."
-                    else -> "Type below. Each note is linked to this moment in the recording."
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
-        }
-        return
-    }
-    LazyColumn(state = listState, modifier = modifier.fillMaxWidth(), contentPadding = PaddingValues(vertical = 8.dp)) {
-        items(notes, key = { it.id }) { note ->
-            val upcoming = player.isPlaying && playerHere && note.recId == player.recId &&
-                note.id != currentId && (note.offsetMs ?: 0L) > player.positionMs
-            NoteRow(
-                note = note,
-                label = noteLabel(session, note),
-                highlighted = note.id == currentId,
-                dimmed = upcoming,
-                photo = note.photo?.let { SessionRepository.photoFile(session.id, it) },
-                isThumbnail = note.id == thumbnailId,
-                onTap = { onTap(note) },
-                onEdit = { onEdit(note) },
-                onDelete = { SessionRepository.deleteNote(session.id, note.id) },
-                onUseAsThumbnail = { SessionRepository.setThumbnail(session.id, note.id) },
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun NoteRow(
-    note: Note,
-    label: String?,
-    highlighted: Boolean,
-    dimmed: Boolean,
-    photo: File?,
-    isThumbnail: Boolean,
-    onTap: () -> Unit,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-    onUseAsThumbnail: () -> Unit,
-) {
-    var menu by remember { mutableStateOf(false) }
-    Box(Modifier.padding(horizontal = 8.dp, vertical = 2.dp)) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(if (highlighted) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
-                .semantics { selected = highlighted }
-                .combinedClickable(onClick = onTap, onLongClick = { menu = true })
-                .padding(horizontal = 8.dp, vertical = 10.dp)
-                .alpha(if (dimmed) 0.45f else 1f),
-            verticalAlignment = Alignment.Top,
-        ) {
-            if (label != null) {
-                Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
-                    Row(
-                        Modifier.padding(start = 4.dp, end = 8.dp, top = 3.dp, bottom = 3.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Text(label, style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"))
-                    }
-                }
-                Spacer(Modifier.width(12.dp))
-            }
-            if (photo != null) {
-                Column(Modifier.weight(1f)) {
-                    NotePhoto(photo, isThumbnail)
-                    if (note.text.isNotBlank()) Text(note.text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
-                    note.textInPhoto?.let { PhotoText(it) }
-                }
-            } else {
-                Text(note.text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f).padding(top = 1.dp))
-            }
-        }
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            DropdownMenuItem(
-                text = { Text(if (photo == null) "Edit" else if (note.text.isBlank()) "Add a caption" else "Edit caption") },
-                leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
-                onClick = {
-                    menu = false
-                    onEdit()
-                },
-            )
-            note.textInPhoto?.let { text ->
-                val context = LocalContext.current
-                DropdownMenuItem(
-                    text = { Text("Copy text in photo") },
-                    leadingIcon = { Icon(AppIcons.Copy, contentDescription = null) },
-                    onClick = {
-                        menu = false
-                        context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Text in photo", text))
-                        // Android 13 and up show their own confirmation.
-                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
-                    },
-                )
-            }
-            if (photo != null && !isThumbnail) {
-                DropdownMenuItem(
-                    text = { Text("Use as thumbnail") },
-                    leadingIcon = { Icon(AppIcons.Image, contentDescription = null) },
-                    onClick = {
-                        menu = false
-                        onUseAsThumbnail()
-                    },
-                )
-            }
-            DropdownMenuItem(
-                text = { Text("Delete") },
-                leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
-                onClick = {
-                    menu = false
-                    onDelete()
-                },
-            )
-        }
-    }
-}
-
-/** The text read off a photo (by SlideText): a few lines of it, all of it once tapped. */
-@Composable
-private fun PhotoText(text: String) {
-    var expanded by rememberSaveable(text) { mutableStateOf(false) }
-    var longer by remember(text) { mutableStateOf(false) }
-    Column(
-        Modifier
-            .padding(top = 6.dp)
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .clickable(enabled = longer, onClickLabel = if (expanded) "Show less" else "Show all") { expanded = !expanded }
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-    ) {
-        Text("Text in photo", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(
-            text,
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = if (expanded) Int.MAX_VALUE else 3,
-            overflow = TextOverflow.Ellipsis,
-            onTextLayout = { if (!expanded) longer = it.hasVisualOverflow },
-        )
-        if (longer) {
-            Text(
-                if (expanded) "Show less" else "Show all",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(top = 2.dp),
-            )
-        }
-    }
-}
-
-/** A photo note's picture at its own shape (up to a height), marked if it's the session's thumbnail. */
-@Composable
-private fun NotePhoto(file: File, isThumbnail: Boolean) {
-    val image = rememberPhoto(file, 1024)
-    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
-        if (image != null) {
-            Image(
-                image,
-                contentDescription = "Photo",
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp).aspectRatio(image.width.toFloat() / image.height),
-            )
-        } else {
-            Spacer(Modifier.fillMaxWidth().aspectRatio(16f / 9f))
-        }
-        if (isThumbnail) {
-            Surface(
-                shape = RoundedCornerShape(6.dp),
-                color = Color.Black.copy(alpha = 0.6f),
-                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
-            ) {
-                Text("Thumbnail", color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
-            }
-        }
     }
 }
 

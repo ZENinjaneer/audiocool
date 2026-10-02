@@ -3,14 +3,25 @@
 Android app that records audio while you type notes. Each note is linked to the moment in the
 recording when you started typing it; tap a note to play from just before that moment.
 
+- **One timeline:** a session shows everything in the order it happened: what was said, in
+  paragraphs; each note right after the paragraph it was written during; photos as chapters; ★ marks.
+  Switch between *Everything*, *Notes + context* (only what was said around each note, the rest folded
+  into "2:15 of talk", which you can tap open) and *Notes only*. While it plays, the paragraph playing
+  lights up, the latest photo opens up and each note grows as playback passes it; the timeline
+  follows along. Tap anything to play from there (notes from a few seconds before).
+- **Waveform scrubber:** drag along the recording's waveform to move through it, and the timeline
+  follows your finger. Notes, marks and photos sit above it as dots and thumbnails: tap one, or press
+  and slide along them, for a quick preview (the note, the photo, or for a ★ what was being said),
+  outlined in the timeline too, with *Play from* to go there. ±10 s and speed (0.75×–2×) as well.
+  Recordings keep their loudness as they're made; older ones are measured once.
 - Recording runs in a foreground service, so it continues with the screen off or in another app.
 - Notes typed while replaying link to the playback position. ★ marks the current moment.
 - **Photos:** tap the camera in the note box to photograph a slide. The photo becomes a note linked
   to that moment; tap it to see it full screen and play the recording from when it was taken. Photos
   can also come from the gallery (⋮ › Add photos from gallery): ones taken during a recording, e.g.
   with the camera app, land at the moment they were taken. Photos are saved upright at up to 2560 px.
-- **Text in photos:** the text in every photo is read on the phone (ML Kit) and shown under it in the
-  notes ("Text in photo": a few lines, tap for all of it; long-press to copy it). It's searchable, and
+- **Text in photos:** the text in every photo is read on the phone (ML Kit) and shown with it on the
+  timeline ("Text in photo": a few lines, tap for all of it; long-press to copy it). It's searchable, and
   shared notes quote it under each photo. A session still named after its start time takes the title
   from its first photo that has one: the biggest text, joined across lines, skipping signs, web
   addresses, slide numbers and anything the reader isn't sure of. A name you give a session is never changed.
@@ -34,15 +45,15 @@ recording when you started typing it; tap a note to play from just before that m
   it's spoken (nothing is uploaded), using [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) and
   NVIDIA Parakeet 0.6B (English), downloaded once (about 660 MB; the app offers it on the main screen
   and while recording, and a recording already going is transcribed from its start once it arrives).
-  Each line is timestamped; tap it to play from there. Older recordings can be transcribed (or
-  re-transcribed) in the background.
+  It reads as paragraphs on the timeline; tap one to play from there. Older recordings can be
+  transcribed (or re-transcribed) in the background.
 - **Noisy and distant speech:** the app finds speech in a noise-filtered copy of the audio (GTCRN),
   which catches far more of it in quiet, echoey or noisy rooms, but Parakeet always hears the original
   recording: every test of feeding it filtered audio made it worse. The recording itself is never altered.
 - **Desktop transcription:** pair with AudioCool Desktop (`desktop/`) on the same Wi-Fi and send a
   session to be transcribed by bigger models on your PC's GPU; the transcript comes back to the phone.
-- **Search:** find words across all notes and transcripts from the main screen, or within one
-  session's transcript. Tapping a result plays from that moment.
+- **Search:** find words across all notes, slide text and transcripts from the main screen, or within
+  one session (its search button). Tapping a result plays from that moment.
 - **Backup:** pick a folder (⋮ › Backup & restore) and every session (audio, notes, transcript) is
   copied there automatically. The copy survives uninstalling; *Restore from a backup* brings it back.
 - Share sends the notes as Markdown (with the transcript) plus the audio files and photos.
