@@ -47,6 +47,24 @@ class SessionLogicTest {
     }
 
     @Test
+    fun theTextInAPhotoIsPartOfTheNotes() {
+        val slide = Note("p1", "", 5_000_000, "r1", 30_000, photo = "photo-p1.jpg", photoText = "Why on-device?\nLatency under 50 ms\nWorks offline")
+        val scenery = Note("p2", "", 5_000_001, "r1", 60_000, photo = "photo-p2.jpg", photoText = "Il\n1")
+        val unread = Note("p3", "", 5_000_002, "r1", 90_000, photo = "photo-p3.jpg")
+        assertEquals("Why on-device?\nLatency under 50 ms\nWorks offline", slide.textInPhoto)
+        // A few stray marks read off a picture with no words in it aren't worth showing.
+        assertNull(scenery.textInPhoto)
+        assertNull(unread.textInPhoto)
+        assertEquals(
+            "- [00:30] ![Photo](photo-p1.jpg)\n" +
+                "  > Why on-device?\n  > Latency under 50 ms\n  > Works offline\n" +
+                "- [01:00] ![Photo](photo-p2.jpg)\n" +
+                "- [01:30] ![Photo](photo-p3.jpg)\n",
+            sessionMarkdown(session(listOf(rec1), listOf(slide, scenery, unread))).substringAfter("\n\n").substringBefore("\nAudio:"),
+        )
+    }
+
+    @Test
     fun formatsTimes() {
         assertEquals("00:00", formatTime(0))
         assertEquals("00:00", formatTime(-5))

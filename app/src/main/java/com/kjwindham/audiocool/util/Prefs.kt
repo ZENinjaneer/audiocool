@@ -21,6 +21,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("speech_model_offer_dismissed", false)
         set(value) = sp.edit { putBoolean("speech_model_offer_dismissed", value) }
 
+    /** Keep a notification with a Record button, for the lock screen, while nothing is recording. */
+    var quickRecord: Boolean
+        get() = sp.getBoolean("quick_record", false)
+        set(value) = sp.edit { putBoolean("quick_record", value) }
+
     /** Record with a plugged-in mic when there is one, instead of the phone's own. */
     var recordWithExternalMic: Boolean
         get() = sp.getBoolean("record_with_external_mic", false)

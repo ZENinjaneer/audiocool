@@ -39,6 +39,8 @@ import com.kjwindham.audiocool.data.Note
 import com.kjwindham.audiocool.data.Recording
 import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.data.TranscriptSegment
+import com.kjwindham.audiocool.ocr.SlideText
+import com.kjwindham.audiocool.ocr.TextLine
 import com.kjwindham.audiocool.transcribe.TranscriptionController
 import com.kjwindham.audiocool.transcribe.TranscriptionService
 import com.kjwindham.audiocool.util.Prefs
@@ -85,6 +87,7 @@ class RecordAndNoteFlowTest {
 
     @After
     fun cleanUp() {
+        SlideText.readerForTest = null
         RecorderController.stop()
         PlayerController.release()
         TranscriptionController.cancelAll()
@@ -94,6 +97,16 @@ class RecordAndNoteFlowTest {
 
     @Test
     fun aPhotoOfTheSlideIsLinkedToTheMomentAndBecomesTheThumbnail() {
+        // What ML Kit would read off the slide.
+        SlideText.readerForTest = {
+            listOf(
+                TextLine("Why on-device speech?", 100, 100, 1500, 220, 100, 0.95f),
+                TextLine("Latency under 50 ms", 140, 320, 900, 370, 45, 0.95f),
+                TextLine("Works offline, on a plane or in a basement", 140, 400, 1400, 450, 45, 0.95f),
+                TextLine("Nothing leaves the phone", 140, 480, 1000, 530, 45, 0.95f),
+                TextLine("Costs nothing per minute", 140, 560, 1000, 610, 45, 0.95f),
+            )
+        }
         compose.onNodeWithContentDescription("New session").performClick()
         compose.onNodeWithText("Start recording").performClick()
         advance(20)
@@ -119,10 +132,18 @@ class RecordAndNoteFlowTest {
         assertTrue("linked at ${photo.offsetMs}", photo.offsetMs!! in 19_000L..21_500L)
         compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription("Photo").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Thumbnail").assertIsDisplayed()
+        // What the slide says is part of the note: a few lines, all of it once tapped.
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Text in photo").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Latency under 50 ms", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Show all").assertIsDisplayed()
+        // And the slide's title named the session (the top bar).
+        assertEquals("Why on-device speech?", SessionRepository.sessions.value.single().title)
         screenshot("9-photo-note")
+        compose.onNodeWithText("Show all").performClick()
+        compose.onNodeWithText("Show less").assertIsDisplayed()
 
-        // Tapping it shows it full screen, with a way to hear what was being said.
-        compose.onAllNodesWithContentDescription("Photo").onFirst().performClick()
+        // Tapping the picture (its text expands or shrinks instead) shows it full screen, with a way to hear what was being said.
+        compose.onAllNodesWithContentDescription("Photo", useUnmergedTree = true).onFirst().performClick()
         compose.onNodeWithText("Play from", substring = true).assertIsDisplayed()
         compose.onNodeWithContentDescription("Close").performClick()
 
@@ -446,7 +467,7 @@ class RecordAndNoteFlowTest {
         assertNotNull(n)
         assertEquals("Recording", n.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
         assertEquals("Bio 101", n.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
-        assertEquals(listOf("Pause", "Stop"), n.actions.map { it.title.toString() })
+        assertEquals(listOf("★ Mark", "Pause", "Stop"), n.actions.map { it.title.toString() })
 
         RecorderController.stop()
         shadowOf(Looper.getMainLooper()).idle()

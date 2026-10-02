@@ -31,7 +31,11 @@ data class Note(
     val photo: String? = null,
     /** The text found in [photo], one line per line; null until it's been read. */
     val photoText: String? = null,
-)
+) {
+    /** The text in [photo] when there's some worth showing: a stray letter or two read off a picture isn't. */
+    val textInPhoto: String?
+        get() = photoText?.trim()?.takeIf { text -> text.count { it.isLetterOrDigit() } >= 4 }
+}
 
 data class Session(
     val id: String,

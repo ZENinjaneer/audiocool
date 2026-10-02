@@ -1,6 +1,7 @@
 package com.kjwindham.audiocool
 
 import android.app.Application
+import com.kjwindham.audiocool.audio.QuickRecord
 import com.kjwindham.audiocool.audio.RecorderController
 import com.kjwindham.audiocool.backup.BackupController
 import com.kjwindham.audiocool.data.SessionRepository
@@ -13,6 +14,7 @@ class AudioCoolApp : Application() {
         super.onCreate()
         SessionRepository.init(this)
         RecorderController.init(this)
+        QuickRecord.init(this)
         TranscriptionController.init(this)
         BackupController.init(this)
         DesktopSync.init(this)

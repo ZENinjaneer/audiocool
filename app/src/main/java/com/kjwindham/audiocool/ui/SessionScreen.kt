@@ -2,9 +2,11 @@ package com.kjwindham.audiocool.ui
 
 import android.Manifest
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import android.os.Build
-import android.os.SystemClock
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -13,7 +15,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -84,7 +85,6 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -97,15 +97,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.onClick
-import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -919,6 +912,7 @@ private fun NoteRow(
                 Column(Modifier.weight(1f)) {
                     NotePhoto(photo, isThumbnail)
                     if (note.text.isNotBlank()) Text(note.text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
+                    note.textInPhoto?.let { PhotoText(it) }
                 }
             } else {
                 Text(note.text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f).padding(top = 1.dp))
@@ -933,6 +927,19 @@ private fun NoteRow(
                     onEdit()
                 },
             )
+            note.textInPhoto?.let { text ->
+                val context = LocalContext.current
+                DropdownMenuItem(
+                    text = { Text("Copy text in photo") },
+                    leadingIcon = { Icon(AppIcons.Copy, contentDescription = null) },
+                    onClick = {
+                        menu = false
+                        context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Text in photo", text))
+                        // Android 13 and up show their own confirmation.
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+                    },
+                )
+            }
             if (photo != null && !isThumbnail) {
                 DropdownMenuItem(
                     text = { Text("Use as thumbnail") },
@@ -950,6 +957,39 @@ private fun NoteRow(
                     menu = false
                     onDelete()
                 },
+            )
+        }
+    }
+}
+
+/** The text read off a photo (by SlideText): a few lines of it, all of it once tapped. */
+@Composable
+private fun PhotoText(text: String) {
+    var expanded by rememberSaveable(text) { mutableStateOf(false) }
+    var longer by remember(text) { mutableStateOf(false) }
+    Column(
+        Modifier
+            .padding(top = 6.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .clickable(enabled = longer, onClickLabel = if (expanded) "Show less" else "Show all") { expanded = !expanded }
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    ) {
+        Text("Text in photo", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = if (expanded) Int.MAX_VALUE else 3,
+            overflow = TextOverflow.Ellipsis,
+            onTextLayout = { if (!expanded) longer = it.hasVisualOverflow },
+        )
+        if (longer) {
+            Text(
+                if (expanded) "Show less" else "Show all",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 2.dp),
             )
         }
     }
@@ -1041,50 +1081,3 @@ private fun Composer(
     }
 }
 
-/**
- * Hold to speak a note, let go to add it. A quick tap listens hands-free until the next tap, which is
- * also what TalkBack's double-tap does.
- */
-@Composable
-private fun DictateButton(listening: Boolean, onStart: () -> Unit, onStop: () -> Unit) {
-    val haptics = LocalHapticFeedback.current
-    val isListening by rememberUpdatedState(listening)
-    var handsFree by remember { mutableStateOf(false) }
-    LaunchedEffect(listening) { if (!listening) handsFree = false }
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .size(48.dp)
-            .clip(CircleShape)
-            .background(if (listening) RecordRed else Color.Transparent)
-            .semantics {
-                role = Role.Button
-                contentDescription = if (listening) "Stop and add the spoken note" else "Speak a note"
-                onClick {
-                    if (isListening) {
-                        onStop()
-                    } else {
-                        handsFree = true
-                        onStart()
-                    }
-                    true
-                }
-            }
-            .pointerInput(Unit) {
-                detectTapGestures(onPress = {
-                    if (handsFree) {
-                        handsFree = false
-                        onStop()
-                        return@detectTapGestures
-                    }
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    val pressedAt = SystemClock.uptimeMillis()
-                    onStart()
-                    val released = tryAwaitRelease()
-                    if (released && SystemClock.uptimeMillis() - pressedAt < 400) handsFree = true else onStop()
-                })
-            },
-    ) {
-        Icon(AppIcons.Mic, contentDescription = null, tint = if (listening) Color.White else MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}

@@ -64,6 +64,8 @@ fun sessionMarkdown(session: Session, includeTranscript: Boolean = false): Strin
         // A photo shows as an image (its file travels with the notes when shared or backed up).
         val text = n.photo?.let { "![${n.text.ifBlank { "Photo" }}]($it)" } ?: n.text
         appendLine(if (label != null) "- [$label] $text" else "- $text")
+        // Then what the photo says, quoted under it.
+        n.textInPhoto?.lines()?.forEach { appendLine("  > $it".trimEnd()) }
     }
     if (recs.isNotEmpty()) {
         appendLine()

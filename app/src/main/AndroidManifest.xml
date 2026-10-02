@@ -11,6 +11,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Photos of the slides from the lock screen, where the phone's camera app can't hand them back. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Only to put the lock screen's Record button back after a restart, when that's turned on. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
     <application
         android:name=".AudioCoolApp"
@@ -35,10 +40,43 @@
             </intent-filter>
         </activity>
 
+        <!-- Works over the lock screen; shows only the capture controls, never the notes. -->
+        <activity
+            android:name=".ui.CaptureActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:taskAffinity="" />
+
+        <service
+            android:name=".audio.RecordTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_mic"
+            android:label="Record"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
+
         <service
             android:name=".audio.RecordingService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <receiver
+            android:name=".audio.QuickRecordRestorer"
+            android:enabled="false"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <service
             android:name=".transcribe.TranscriptionService"

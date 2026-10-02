@@ -10,12 +10,14 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import com.kjwindham.audiocool.data.Note
 import com.kjwindham.audiocool.data.Recording
 import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.data.newId
 import com.kjwindham.audiocool.transcribe.LiveTranscription
 import com.kjwindham.audiocool.transcribe.TranscriptionController
 import com.kjwindham.audiocool.util.Prefs
+import com.kjwindham.audiocool.util.defaultSessionTitle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -54,6 +56,8 @@ object RecorderController {
         /** A plugged-in mic it could record from instead, if any. */
         val externalMic: String? = null,
         val usingExternalMic: Boolean = false,
+        /** Where in the recording the last ★ from outside the app (notification, lock screen) went. */
+        val markedAtMs: Long? = null,
     )
 
     private val _state = MutableStateFlow(State())
@@ -179,6 +183,24 @@ object RecorderController {
     }
 
     fun clearError() = _state.update { it.copy(error = null) }
+
+    /** Starts recording into a new session (from the tile or the lock screen); returns its id, or null if it couldn't. */
+    fun startNewSession(): String? {
+        if (_state.value.status != Status.IDLE) return null
+        val session = SessionRepository.create(defaultSessionTitle())
+        if (start(session.id)) return session.id
+        SessionRepository.delete(session.id)
+        return null
+    }
+
+    /** Marks this moment of the recording with a ★ note, as the ★ button in the app does. */
+    fun mark() {
+        val st = _state.value
+        if (st.status == Status.IDLE || st.sessionId == null || st.recId == null) return
+        val at = currentOffsetMs()
+        SessionRepository.addNote(st.sessionId, Note(newId(), "★ Marked", System.currentTimeMillis(), st.recId, at))
+        _state.update { it.copy(markedAtMs = at) }
+    }
 
     /** The speech model just finished downloading: transcribe the recording in progress live, catching up from its start. */
     fun modelReady() {

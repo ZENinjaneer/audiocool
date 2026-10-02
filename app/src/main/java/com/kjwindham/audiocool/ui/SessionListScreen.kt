@@ -114,6 +114,7 @@ fun SessionListScreen(
     var showBackup by remember { mutableStateOf(false) }
     var showDesktop by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
+    var showLockScreen by remember { mutableStateOf(false) }
     var confirmModelDownload by remember { mutableStateOf(false) }
     var confirmLiveDownload by remember { mutableStateOf(false) }
     var autoTranscribe by remember { mutableStateOf(TranscriptionController.autoTranscribe) }
@@ -217,6 +218,13 @@ fun SessionListScreen(
                                     onClick = {
                                         showMenu = false
                                         showBackup = true
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Lock screen controls") },
+                                    onClick = {
+                                        showMenu = false
+                                        showLockScreen = true
                                     },
                                 )
                                 DropdownMenuItem(
@@ -350,6 +358,7 @@ fun SessionListScreen(
     }
     if (showDesktop) DesktopDialog(onDismiss = { showDesktop = false })
     if (showAbout) AboutDialog(onDismiss = { showAbout = false })
+    if (showLockScreen) LockScreenDialog(onDismiss = { showLockScreen = false })
     if (showBackup) {
         BackupDialog(
             onDismiss = { showBackup = false },

@@ -9,13 +9,20 @@ recording when you started typing it; tap a note to play from just before that m
   to that moment; tap it to see it full screen and play the recording from when it was taken. Photos
   can also come from the gallery (⋮ › Add photos from gallery): ones taken during a recording, e.g.
   with the camera app, land at the moment they were taken. Photos are saved upright at up to 2560 px.
-- **Titles from the slides:** the text in each photo is read on the phone (ML Kit). A session still
-  named after its start time takes the title from its first photo that has one: the biggest text,
-  joined across lines, skipping signs, web addresses, slide numbers and anything the reader isn't sure
-  of. A name you give a session is never changed. The text on photos is searchable too.
+- **Text in photos:** the text in every photo is read on the phone (ML Kit) and shown under it in the
+  notes ("Text in photo": a few lines, tap for all of it; long-press to copy it). It's searchable, and
+  shared notes quote it under each photo. A session still named after its start time takes the title
+  from its first photo that has one: the biggest text, joined across lines, skipping signs, web
+  addresses, slide numbers and anything the reader isn't sure of. A name you give a session is never changed.
 - **Thumbnails and gallery view:** a session's first photo becomes its thumbnail (long-press another
   photo to use it instead). The grid button on the main screen switches between the list and a
   gallery of thumbnails with each session's name underneath; search results show them too.
+- **Lock screen:** while recording, the notification works without unlocking: ★ Mark, Pause/Resume and
+  Stop, and tapping it opens a capture screen over the lock screen with the camera, spoken notes, mark,
+  pause and stop (it never shows your notes). To *start* without unlocking, turn on the Record button
+  (⋮ › Lock screen controls): a quiet notification, there while you're not recording; tap it to record
+  with the camera ready, or press its Record button to just record. There's also a Record tile for
+  quick settings, which starts and stops recording; from the lock screen it asks you to unlock first.
 - **Spoken notes:** hold the mic button next to the note box and say the note; it's transcribed on
   the phone and linked to the moment you started speaking (a quick tap listens hands-free until the
   next tap). With a headset plugged in or paired, notes are heard through the headset's mic while the
