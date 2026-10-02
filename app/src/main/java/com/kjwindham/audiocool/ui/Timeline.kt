@@ -14,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -68,14 +69,20 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -83,6 +90,7 @@ import com.kjwindham.audiocool.data.Note
 import com.kjwindham.audiocool.data.Session
 import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.data.TimelineRow
+import com.kjwindham.audiocool.data.currentWord
 import com.kjwindham.audiocool.data.noteKey
 import com.kjwindham.audiocool.util.noteLabel
 import com.kjwindham.audiocool.util.timeLabel
@@ -185,6 +193,8 @@ fun TimelinePane(
     onFold: (TimelineRow.Fold) -> Unit,
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
+    positionMs: Long? = null,
+    onPlayWord: (TimelineRow.Speech, Long) -> Unit = { _, _ -> },
 ) {
     val colors = timelineColors()
     val thumbnailId = session.thumbnailNote()?.id
@@ -248,7 +258,10 @@ fun TimelinePane(
                         tint = tintNote?.let { colors.of(it).tint },
                         dot = dotNote?.let { colors.of(it).dot },
                         colors = colors,
+                        // Only the paragraph playing follows the position, so only it redraws as it moves.
+                        positionMs = if (row.key == playingKey) positionMs else null,
                         onClick = { onPlaySpeech(row) },
+                        onPlayWord = { onPlayWord(row, it) },
                     )
                 }
                 is TimelineRow.Photo -> PhotoChapter(
@@ -310,10 +323,31 @@ private fun SpeechParagraph(
     tint: Color?,
     dot: Color?,
     colors: TimelineColors,
+    positionMs: Long?,
     onClick: () -> Unit,
+    onPlayWord: (Long) -> Unit,
 ) {
     val context = LocalContext.current
     var menu by remember { mutableStateOf(false) }
+    // Word by word: the word being said lit up, what's still to come lighter. Colors only, never a
+    // heavier weight, which would reflow the lines as the word moves.
+    val word = if (playing && positionMs != null) currentWord(row.words, positionMs) else -1
+    val lit = MaterialTheme.colorScheme.primaryContainer
+    val onLit = MaterialTheme.colorScheme.onPrimaryContainer
+    val toCome = MaterialTheme.colorScheme.onSurfaceVariant
+    val shown = remember(row.text, row.words, word, lit, toCome) {
+        if (word < 0) {
+            AnnotatedString(row.text)
+        } else {
+            val w = row.words[word]
+            buildAnnotatedString {
+                append(row.text.substring(0, w.start))
+                withStyle(SpanStyle(background = lit, color = onLit)) { append(row.text.substring(w.start, w.end)) }
+                withStyle(SpanStyle(color = toCome)) { append(row.text.substring(w.end)) }
+            }
+        }
+    }
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val background by animateColorAsState(tint ?: if (playing) colors.raised else Color.Transparent, label = "paragraph")
     val shape = RoundedCornerShape(14.dp)
     Box {
@@ -341,7 +375,8 @@ private fun SpeechParagraph(
             }
             Spacer(Modifier.width(8.dp))
             Text(
-                row.text,
+                shown,
+                onTextLayout = { layout = it },
                 style = if (row.context) {
                     MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic, lineHeight = 21.sp)
                 } else {
@@ -354,7 +389,23 @@ private fun SpeechParagraph(
                 },
                 maxLines = if (row.context) 2 else Int.MAX_VALUE,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).then(
+                    if (row.words.isEmpty()) {
+                        Modifier
+                    } else {
+                        // Tap a word to play from it (the time column still plays the paragraph).
+                        Modifier.pointerInput(row.words) {
+                            detectTapGestures(
+                                onTap = { at ->
+                                    val offset = layout?.getOffsetForPosition(at)
+                                    val tapped = offset?.let { o -> row.words.lastOrNull { it.start <= o } }
+                                    if (tapped != null) onPlayWord(tapped.atMs) else onClick()
+                                },
+                                onLongPress = { menu = true },
+                            )
+                        }
+                    },
+                ),
             )
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {

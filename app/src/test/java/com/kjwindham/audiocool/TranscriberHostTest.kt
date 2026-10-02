@@ -71,6 +71,12 @@ class TranscriberHostTest {
             val gap = second[0].startMs - first[0].startMs
             assertTrue("second copy starts $gap ms after the first, expected ~${clipMs + 3_000}", kotlin.math.abs(gap - (clipMs + 3_000)) <= 150)
             assertTrue(segments.all { it.endMs > it.startMs })
+            // Timed word by word: a start for every word, in order, within the phrase.
+            for (s in segments) {
+                val starts = s.words
+                assertTrue("word times for \"${s.text}\": $starts", starts != null && starts.size == s.text.split(' ').size)
+                assertTrue("in order: $starts", starts!!.zipWithNext().all { (a, b) -> a <= b } && starts.last() <= s.endMs - s.startMs)
+            }
         }
     }
 

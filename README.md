@@ -32,7 +32,7 @@
 - **Notes that remember the moment.** Each note is linked to the second you started typing it. Tap
   it later to hear what was being said.
 - **Live transcript.** NVIDIA's Parakeet model writes down what's said as you record, right on
-  your phone.
+  your phone. On playback each word lights up as it's said; tap a word to hear it.
 - **Slides become chapters.** Snap a slide and it lands where it was shown. Its text is read, made
   searchable, and used to name the session.
 - **One timeline.** What was said, your notes, ★ marks and photos, in order. Show everything, notes

@@ -35,6 +35,9 @@ after the paragraph it was written during; photos as chapters; ★ marks.
   folded into "2:15 of talk", which you can tap open) and **Notes only**.
 - While it plays, the paragraph playing lights up, the latest photo opens up and each note grows as
   playback passes it; the timeline follows along.
+- **Word by word:** in the paragraph playing, the word being said is highlighted and what's still to
+  come is lighter, like karaoke. Tap a word to play from it. Recordings transcribed before 2.2 can get
+  word timings with ⋮ › **Transcribe again, word by word**; the desktop's transcripts have them too.
 - Tap anything to play from there (notes from a few seconds before).
 
 ## Waveform scrubber

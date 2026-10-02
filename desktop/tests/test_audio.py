@@ -161,3 +161,13 @@ def test_make_chunks():
     chunks = make_chunks(speech, max_s=30, max_gap_s=1.5)
     assert chunks == [(0, 12 * sr), (12 * sr + 4000, 31 * sr), (40 * sr, 45 * sr)]
     assert make_chunks([(0, 70 * sr)], max_s=30) == [(0, 30 * sr), (30 * sr, 60 * sr), (60 * sr, 70 * sr)]
+
+
+def test_lines_say_where_each_word_starts():
+    segs = build_segments(words_from("Okay. Yes. So let us begin with the cell membrane and its structure."))
+    for seg in segs:
+        assert len(seg["w"]) == len(seg["t"].split(" "))
+        assert seg["w"] == sorted(seg["w"]) and 0 <= seg["w"][0] and seg["w"][-1] <= seg["e"] - seg["s"]
+    # Words that don't line up with the text one to one (CJK, joined without spaces) aren't timed.
+    cjk = build_segments([Word("你好", 0.0, 0.5), Word("世界", 0.5, 1.0)])
+    assert cjk[0]["t"] == "你好世界" and "w" not in cjk[0]

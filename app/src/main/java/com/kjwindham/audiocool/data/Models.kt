@@ -18,7 +18,13 @@ data class Recording(
 )
 
 /** A stretch of speech in a recording and the text recognized in it. */
-data class TranscriptSegment(val startMs: Long, val endMs: Long, val text: String)
+data class TranscriptSegment(
+    val startMs: Long,
+    val endMs: Long,
+    val text: String,
+    /** Where each word of [text] (split at its spaces) starts, in ms from [startMs]; null when not known. */
+    val words: List<Int>? = null,
+)
 
 data class Note(
     val id: String,

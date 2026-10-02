@@ -22,6 +22,8 @@ sealed interface TimelineRow {
         val noteIds: List<String> = emptyList(),
         /** Shown only as the context of a note (in [TimelineMode.CONTEXT]). */
         val context: Boolean = false,
+        /** Each word of [text], when what was said was timed word by word; else none. */
+        val words: List<TimedWord> = emptyList(),
     ) : TimelineRow {
         override val key get() = speechKey(recId, startMs)
     }
@@ -52,6 +54,12 @@ sealed interface TimelineRow {
     }
 }
 
+/** A word of a paragraph: when it starts in the recording, and where it is in the paragraph's text. */
+data class TimedWord(val atMs: Long, val start: Int, val end: Int)
+
+/** The word being said at [positionMs]: the last to have started (a moment early, as it's heard), or -1. */
+fun currentWord(words: List<TimedWord>, positionMs: Long): Int = words.indexOfLast { it.atMs <= positionMs + 80 }
+
 fun noteKey(noteId: String) = "note:$noteId"
 
 fun speechKey(recId: String, startMs: Long) = "speech:$recId:$startMs"
@@ -66,11 +74,16 @@ internal const val PARAGRAPH_PAUSE_MS = 2_000L
 fun paragraphs(rec: Recording, breaks: List<Long>): List<TimelineRow.Speech> {
     val out = ArrayList<TimelineRow.Speech>()
     val text = StringBuilder()
+    val timed = ArrayList<TimedWord>()
+    var allTimed = true
     var start = 0L
     var end = 0L
     fun flush() {
-        if (text.isNotEmpty()) out += TimelineRow.Speech(rec.id, start, end, text.toString())
+        // Word by word only when every phrase in it was timed so, or the wrong word could light up.
+        if (text.isNotEmpty()) out += TimelineRow.Speech(rec.id, start, end, text.toString(), words = if (allTimed) timed.toList() else emptyList())
         text.clear()
+        timed.clear()
+        allTimed = true
     }
     for (segment in rec.transcript.orEmpty()) {
         val words = segment.text.trim()
@@ -84,6 +97,17 @@ fun paragraphs(rec: Recording, breaks: List<Long>): List<TimelineRow.Speech> {
             flush()
         }
         if (text.isEmpty()) start = segment.startMs else text.append(' ')
+        val pieces = words.split(' ')
+        val offsets = segment.words
+        if (offsets != null && offsets.size == pieces.size) {
+            var at = text.length
+            pieces.forEachIndexed { i, piece ->
+                timed += TimedWord(segment.startMs + offsets[i], at, at + piece.length)
+                at += piece.length + 1
+            }
+        } else {
+            allTimed = false
+        }
         text.append(words)
         end = segment.endMs
     }

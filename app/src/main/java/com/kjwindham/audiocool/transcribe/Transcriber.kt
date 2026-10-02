@@ -10,6 +10,7 @@ import com.k2fsa.sherpa.onnx.Vad
 import com.k2fsa.sherpa.onnx.VadModelConfig
 import com.kjwindham.audiocool.data.TranscriptSegment
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
  * Turns 16 kHz mono audio into timestamped text. Silero VAD scores each 32 ms for speech,
@@ -102,19 +103,21 @@ class Transcriber(
         val from = maxOf(start, audioStart)
         val to = minOf(end, audioEnd)
         if (to <= from) return
-        val text = recognize(audio.copyOfRange((from - audioStart).toInt(), (to - audioStart).toInt()))
+        val (text, words) = recognize(audio.copyOfRange((from - audioStart).toInt(), (to - audioStart).toInt()))
         if (text.isEmpty()) return
-        val segment = TranscriptSegment(offsetMs + from * 1000 / SAMPLE_RATE, offsetMs + to * 1000 / SAMPLE_RATE, text)
+        val segment = TranscriptSegment(offsetMs + from * 1000 / SAMPLE_RATE, offsetMs + to * 1000 / SAMPLE_RATE, text, words)
         segments += segment
         onSegment(segment)
     }
 
-    private fun recognize(samples: FloatArray): String {
+    /** The text in [samples], and where each of its words starts (ms from the start), when the model says. */
+    private fun recognize(samples: FloatArray): Pair<String, List<Int>?> {
         val stream = recognizer.createStream()
         try {
             stream.acceptWaveform(if (levelSegments) level(samples) else samples, SAMPLE_RATE)
             recognizer.decode(stream)
-            return recognizer.getResult(stream).text.trim()
+            val result = recognizer.getResult(stream)
+            return timedWords(result.tokens, result.timestamps) ?: (result.text.trim() to null)
         } finally {
             stream.release()
         }
@@ -122,6 +125,26 @@ class Transcriber(
 
     companion object {
         const val SAMPLE_RATE = 16_000
+
+        /**
+         * The words in a recognizer's [tokens] (a token that starts with a space starts a word; the rest
+         * join the word before, as punctuation does) and where each word starts, in ms, from [seconds]
+         * (each token's start). Null if the model gave no timing.
+         */
+        fun timedWords(tokens: Array<String>, seconds: FloatArray): Pair<String, List<Int>>? {
+            if (tokens.isEmpty() || tokens.size != seconds.size) return null
+            val words = ArrayList<Pair<StringBuilder, Int>>()
+            tokens.forEachIndexed { i, token ->
+                if (token.startsWith(" ") || words.isEmpty()) {
+                    words += StringBuilder(token.trim()) to (seconds[i] * 1000).roundToInt()
+                } else {
+                    words.last().first.append(token)
+                }
+            }
+            val kept = words.filter { it.first.isNotEmpty() }
+            if (kept.isEmpty()) return null
+            return kept.joinToString(" ") { it.first } to kept.map { it.second }
+        }
 
         /** Scales a phrase to about -24 dBFS RMS (at most +18 dB), without clipping. */
         fun level(samples: FloatArray): FloatArray {

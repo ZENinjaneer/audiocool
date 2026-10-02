@@ -38,7 +38,9 @@ object SessionJson {
                     r.transcriptModel?.let { put("transcriptModel", it) }
                     r.transcript?.let { segments ->
                         put("transcript", JSONArray().apply {
-                            segments.forEach { put(JSONObject().put("s", it.startMs).put("e", it.endMs).put("t", it.text)) }
+                            segments.forEach { seg ->
+                                put(JSONObject().put("s", seg.startMs).put("e", seg.endMs).put("t", seg.text).apply { seg.words?.let { put("w", JSONArray(it)) } })
+                            }
                         })
                     }
                 })
@@ -84,7 +86,10 @@ object SessionJson {
                     transcript = r.optJSONArray("transcript")?.let { a ->
                         List(a.length()) { j ->
                             val t = a.getJSONObject(j)
-                            TranscriptSegment(t.getLong("s"), t.getLong("e"), t.getString("t"))
+                            TranscriptSegment(
+                                t.getLong("s"), t.getLong("e"), t.getString("t"),
+                                t.optJSONArray("w")?.let { w -> (0 until w.length()).map { w.getInt(it) } },
+                            )
                         }
                     },
                 )

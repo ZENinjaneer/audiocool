@@ -133,6 +133,7 @@ import com.kjwindham.audiocool.search.SearchHit
 import com.kjwindham.audiocool.search.searchSession
 import com.kjwindham.audiocool.summarize.Organizer
 import com.kjwindham.audiocool.transcribe.LiveTranscription
+import com.kjwindham.audiocool.transcribe.SpeechModel
 import com.kjwindham.audiocool.transcribe.TranscriptionController
 import com.kjwindham.audiocool.util.Prefs
 import com.kjwindham.audiocool.util.defaultSessionTitle
@@ -572,6 +573,14 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
                                     },
                                 )
                             }
+                            // Transcribed on the phone before word timings: offer them (never over the desktop's transcript).
+                            val untimed = session.recordings.filter { r -> r.transcriptModel == SpeechModel.ID && r.transcript?.any { it.words == null } == true }
+                            if (untimed.isNotEmpty() && !recordingHere) {
+                                DropdownMenuItem(text = { Text("Transcribe again, word by word") }, onClick = {
+                                    showMenu = false
+                                    transcribe(untimed.map { it.id })
+                                })
+                            }
                             DropdownMenuItem(text = { Text("Tap a note: start ${leadInSec}s before") }, onClick = {
                                 showMenu = false
                                 pickLeadIn = true
@@ -676,6 +685,8 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
                         },
                         modifier = Modifier.fillMaxSize(),
                         listState = timelineList,
+                        positionMs = position,
+                        onPlayWord = { row, atMs -> playFrom(row.recId, atMs) },
                     )
                 }
                 val peekNote = peekId?.let { id -> session.notes.firstOrNull { it.id == id } }
