@@ -1,6 +1,7 @@
 package com.kjwindham.audiocool.ui
 
 import android.Manifest
+import android.util.Log
 import android.content.Context
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -130,6 +131,7 @@ fun CaptureScreen(onDone: () -> Unit, onOpenApp: (String?) -> Unit) {
         val file = File(File(context.cacheDir, "capture").apply { mkdirs() }, "lock-${System.currentTimeMillis()}.jpg")
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         flash = true
+        Log.i("CaptureScreen", "Taking a photo at $at ms of $recId")
         capture.takePicture(
             ImageCapture.OutputFileOptions.Builder(file).build(),
             ContextCompat.getMainExecutor(context),
@@ -141,6 +143,7 @@ fun CaptureScreen(onDone: () -> Unit, onOpenApp: (String?) -> Unit) {
                 }
 
                 override fun onError(exception: ImageCaptureException) {
+                    Log.e("CaptureScreen", "Couldn't take the photo", exception)
                     file.delete()
                     message = "Couldn't take the photo."
                 }

@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -132,6 +133,8 @@ import kotlinx.coroutines.launch
 
 /** A moment in one of the session's recordings. */
 private data class Stamp(val recId: String, val offsetMs: Long)
+
+private const val TAG = "SessionScreen"
 
 /**
  * A session: everything in it on one timeline (notes, photos and what was said), the recording or
@@ -337,6 +340,7 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
     }
 
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { taken ->
+        Log.i(TAG, "Camera app returned: taken=$taken, file=$capturePath (${capturePath?.let { File(it).length() }} bytes)")
         val file = capturePath?.let(::File) ?: return@rememberLauncherForActivityResult
         capturePath = null
         if (taken && file.length() > 0) {
@@ -358,6 +362,7 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
         capturePath = file.path
         captureRec = stamp?.recId
         captureMs = stamp?.offsetMs ?: -1L
+        Log.i(TAG, "Opening the camera app for a photo at ${stamp?.offsetMs} ms of ${stamp?.recId}")
         try {
             camera.launch(uri)
         } catch (e: ActivityNotFoundException) {

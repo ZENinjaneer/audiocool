@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -85,6 +86,7 @@ import com.kjwindham.audiocool.search.SearchHit
 import com.kjwindham.audiocool.search.searchAll
 import com.kjwindham.audiocool.transcribe.SpeechModel
 import com.kjwindham.audiocool.transcribe.TranscriptionController
+import com.kjwindham.audiocool.util.AppLog
 import com.kjwindham.audiocool.util.Prefs
 import com.kjwindham.audiocool.util.defaultSessionTitle
 import com.kjwindham.audiocool.util.formatDate
@@ -119,6 +121,7 @@ fun SessionListScreen(
     var confirmLiveDownload by remember { mutableStateOf(false) }
     var autoTranscribe by remember { mutableStateOf(TranscriptionController.autoTranscribe) }
     val context = LocalContext.current
+    var crashedLastTime by remember { mutableStateOf(AppLog.crashedLastTime(context)) }
     val prefs = remember { Prefs(context) }
     var offerDismissed by remember { mutableStateOf(prefs.speechModelOfferDismissed) }
     var galleryView by remember { mutableStateOf(prefs.galleryView) }
@@ -225,6 +228,13 @@ fun SessionListScreen(
                                     onClick = {
                                         showMenu = false
                                         showLockScreen = true
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Share the app's log") },
+                                    onClick = {
+                                        showMenu = false
+                                        AppLog.share(context)
                                     },
                                 )
                                 DropdownMenuItem(
@@ -359,6 +369,28 @@ fun SessionListScreen(
     if (showDesktop) DesktopDialog(onDismiss = { showDesktop = false })
     if (showAbout) AboutDialog(onDismiss = { showAbout = false })
     if (showLockScreen) LockScreenDialog(onDismiss = { showLockScreen = false })
+    if (crashedLastTime) {
+        AlertDialog(
+            onDismissRequest = {
+                AppLog.dismissCrash(context)
+                crashedLastTime = false
+            },
+            title = { Text("AudioCool closed unexpectedly") },
+            text = { Text("Sharing the app's log (what it was doing, and the error) helps get it fixed. It doesn't include your notes or recordings.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    crashedLastTime = false
+                    AppLog.share(context)
+                }) { Text("Share the log") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    AppLog.dismissCrash(context)
+                    crashedLastTime = false
+                }) { Text("Not now") }
+            },
+        )
+    }
     if (showBackup) {
         BackupDialog(
             onDismiss = { showBackup = false },

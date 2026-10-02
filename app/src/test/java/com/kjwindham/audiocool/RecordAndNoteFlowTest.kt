@@ -15,6 +15,7 @@ import android.provider.MediaStore
 import android.os.Looper
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isSelected
@@ -158,6 +159,58 @@ class RecordAndNoteFlowTest {
         assertTrue(Prefs(app).galleryView)
         letPhotosLoad()
         screenshot("11-gallery")
+    }
+
+    @Test
+    fun photosWhileTranscribingLiveKeepTheTimelineTogether() {
+        compose.onNodeWithContentDescription("New session").performClick()
+        compose.onNodeWithText("Start recording").performClick()
+        val sessionId = SessionRepository.sessions.value.single().id
+        val recId = RecorderController.state.value.recId!!
+        var at = 0L
+        // Live transcription adds a phrase every few seconds, as it does while recording.
+        fun speak(seconds: Long, text: String) {
+            advance(seconds)
+            SessionRepository.appendTranscriptSegment(sessionId, recId, TranscriptSegment(at, at + seconds * 1000 - 300, text))
+            at += seconds * 1000
+            compose.waitForIdle()
+        }
+        fun photo() {
+            compose.onNodeWithContentDescription("Take a photo").performClick()
+            val request = shadowOf(compose.activity).nextStartedActivityForResult.intent
+            @Suppress("DEPRECATION")
+            val output = request.getParcelableExtra<Uri>(MediaStore.EXTRA_OUTPUT)!!
+            val slide = Bitmap.createBitmap(1600, 900, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.DKGRAY) }
+            File(app.cacheDir, "capture/${output.lastPathSegment}").outputStream().use { slide.compress(Bitmap.CompressFormat.JPEG, 80, it) }
+            shadowOf(compose.activity).receiveResult(request, Activity.RESULT_OK, Intent())
+            val before = SessionRepository.get(sessionId)!!.notes.count { it.photo != null }
+            compose.waitUntil(10_000) { SessionRepository.get(sessionId)!!.notes.count { it.photo != null } > before }
+        }
+        speak(6, "Good morning, everyone.")
+        speak(8, "Today we look at how phones run models.")
+        photo()
+        // The phrase under way when the photo was taken, then more after it.
+        speak(9, "First, memory is the real limit.")
+        typeNote("Memory first")
+        speak(7, "Second, the battery.")
+        photo()
+        photo()
+        speak(30, "A long stretch about quantization and calibration and what goes wrong without it.")
+        compose.onNodeWithContentDescription("Mark this moment").performClick()
+        speak(4, "Questions?")
+        compose.waitForIdle()
+        assertTrue(SessionRepository.get(sessionId)!!.notes.any { it.text == "Memory first" })
+        assertEquals(3, SessionRepository.get(sessionId)!!.notes.count { it.photo != null })
+        screenshot("19-live-photos")
+
+        compose.onNodeWithContentDescription("Stop recording").performClick()
+        compose.waitForIdle()
+        // Every view of it holds together.
+        for (view in listOf("Notes + context", "Notes only", "Everything")) {
+            compose.onNodeWithText(view).performClick()
+            compose.waitForIdle()
+            compose.onNodeWithText(view).assertIsSelected()
+        }
     }
 
     @Test

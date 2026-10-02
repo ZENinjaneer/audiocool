@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
+import android.util.Log
 import android.provider.MediaStore
 import androidx.core.content.FileProvider
 import com.kjwindham.audiocool.ocr.SlideText
@@ -26,6 +27,7 @@ import kotlinx.coroutines.withContext
  * slide text, at a fraction of a camera photo's size.
  */
 object Photos {
+    private const val TAG = "Photos"
     const val MAX_EDGE = 2560
     private const val QUALITY = 85
 
@@ -81,7 +83,10 @@ object Photos {
     private fun add(resolver: ContentResolver, sessionId: String, source: Uri, createdAt: Long, recId: String?, offsetMs: Long?): Boolean {
         val id = newId()
         val name = "photo-$id.jpg"
-        val saved = runCatching { save(resolver, source, SessionRepository.photoFile(sessionId, name)) }.getOrDefault(false)
+        val result = runCatching { save(resolver, source, SessionRepository.photoFile(sessionId, name)) }
+        result.exceptionOrNull()?.let { Log.e(TAG, "Couldn't save the photo from $source", it) }
+        val saved = result.getOrDefault(false)
+        Log.i(TAG, "Photo from $source: ${if (saved) "saved as $name at $offsetMs ms of $recId" else "not saved"}")
         if (saved) {
             SessionRepository.addNote(sessionId, Note(id, "", createdAt, recId, offsetMs, photo = name))
             SlideText.photoAdded(sessionId, id)

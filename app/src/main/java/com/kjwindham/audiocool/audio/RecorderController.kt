@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import com.kjwindham.audiocool.data.MARK_TEXT
 import com.kjwindham.audiocool.data.Note
 import com.kjwindham.audiocool.data.Recording
@@ -42,6 +43,7 @@ import kotlin.math.log10
  * switches to a plugged-in mic instead, such as a clip-on mic near the speaker.
  */
 object RecorderController {
+    private const val TAG = "RecorderController"
     enum class Status { IDLE, RECORDING, PAUSED }
 
     data class State(
@@ -125,6 +127,7 @@ object RecorderController {
         val rec = Recording(id = newId(), file = file.name, createdAt = System.currentTimeMillis(), durationMs = 0)
         SessionRepository.addRecording(sessionId, rec)
         _state.value = State(Status.RECORDING, sessionId, rec.id)
+        Log.i(TAG, "Recording ${rec.id} into session $sessionId (${file.name})")
         Waveform.liveStart(rec.id)
         app.getSystemService(AudioManager::class.java).registerAudioDeviceCallback(deviceCallback, Handler(Looper.getMainLooper()))
         routeMic()
@@ -160,6 +163,7 @@ object RecorderController {
         val st = _state.value
         if (st.status == Status.IDLE) return
         val duration = currentOffsetMs()
+        Log.i(TAG, "Stopping ${st.recId} at $duration ms")
         ticker?.cancel()
         app.getSystemService(AudioManager::class.java).unregisterAudioDeviceCallback(deviceCallback)
         Dictation.recordingStopped(app)
@@ -248,6 +252,7 @@ object RecorderController {
     }
 
     private fun fail(message: String) {
+        Log.e(TAG, message)
         stop()
         _state.update { it.copy(error = message) }
     }

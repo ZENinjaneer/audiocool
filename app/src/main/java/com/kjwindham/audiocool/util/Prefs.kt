@@ -16,6 +16,11 @@ class Prefs(context: Context) {
         get() = sp.getString("timeline_mode", "EVERYTHING").orEmpty()
         set(value) = sp.edit { putString("timeline_mode", value) }
 
+    /** The app crashed and the log hasn't been shared since: offer to. */
+    var unreportedCrash: Boolean
+        get() = sp.getBoolean("unreported_crash", false)
+        set(value) = sp.edit(commit = true) { putBoolean("unreported_crash", value) }
+
     /** Show sessions on the main screen as a grid of thumbnails rather than a list. */
     var galleryView: Boolean
         get() = sp.getBoolean("gallery_view", false)
