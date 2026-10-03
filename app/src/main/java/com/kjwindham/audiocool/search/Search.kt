@@ -54,11 +54,13 @@ fun searchSession(session: Session, query: String): List<SearchHit> {
     }
     // A chapter's summary, just ahead of what's in the chapter.
     for (chapter in session.chapterSummaries) {
-        val matches = findTerms(chapter.text, terms) ?: continue
+        // Its title too ("Your circadian clock: Morning light resets it…").
+        val text = chapter.title?.let { "$it: ${chapter.text}" } ?: chapter.text
+        val matches = findTerms(text, terms) ?: continue
         val (recId, startMs) = parseChapterKey(chapter.key) ?: continue
         val rec = session.recording(recId) ?: continue
         hits += SearchHit(
-            session.id, HitKind.SUMMARY, chapter.text, matches, rec.id, startMs,
+            session.id, HitKind.SUMMARY, text, matches, rec.id, startMs,
             timelineKey = rec.createdAt + startMs - 1, chapterKey = chapter.key,
         )
     }

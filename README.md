@@ -41,8 +41,9 @@
   with the talk around them, or just your notes.
 - **A waveform to scrub.** Drag through the recording, or tap a marker for a quick preview before
   you jump there.
-- **Summaries.** A few sentences under each slide, and a summary of the whole session with key
-  points and action items, written on the phone by Google's Gemma 4.
+- **Summaries and chapters.** A talk comes in titled chapters (at its slides, or where it turns to
+  something new), each summarized, plus a summary of the whole session with key points and action
+  items, written on the phone by Google's Gemma 4.
 - **Folders.** Keep each course or project together. The summary model can suggest folders, and file
   new sessions as they're summarized.
 - **Search everything.** Folders, session names, summaries, notes, slide text and every word said,

@@ -85,7 +85,7 @@ class SummaryTest {
     @Test
     fun theModelIsAskedAboutAChapterWithItsSlideNotesAndWords() {
         val prompt = SummaryPrompts.chapter(chapters(session) { null }[1])
-        assertTrue(prompt.startsWith("Summarize this part of the talk in 1 to 3 sentences, at most 60 words."))
+        assertTrue(prompt.startsWith("Give this part of the talk a short title of 2 to 6 words, and summarize it in 1 to 3 sentences, at most 60 words."))
         assertTrue(prompt.contains("Slide (photo of the screen):\nQuantization 101\n8-bit and 4-bit weights"))
         assertTrue(prompt.contains("What was said:\nEight bits per weight. Smaller is faster."))
         assertFalse(prompt.contains("listener's notes"))

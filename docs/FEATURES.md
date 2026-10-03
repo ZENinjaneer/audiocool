@@ -114,9 +114,13 @@ after the paragraph it was written during; photos as chapters; ★ marks.
 Google's Gemma 4 E2B (2.6 GB, downloaded once; ⋮ › Summaries) runs on the phone through LiteRT-LM,
 in a background process of its own.
 
-- A session is cut into chapters: each slide photo and what was said until the next one (or a few
-  minutes of talk). Each chapter is summarized in two or three sentences as soon as it's complete,
-  during a recording too, and the summary sits on the timeline under its slide.
+- A session is cut into chapters: each slide photo and what was said until the next one. A talk
+  without slides (or a long stretch between them) is cut where it turns to something else, every few
+  minutes. Each chapter gets a short title and a summary of two or three sentences as soon as it's
+  complete, during a recording too: under its slide, or as a heading ("Chapter 3 · 12:38") when it
+  has none.
+- ⋮ › **Chapters** lists them with what each is about and where it starts, the one playing marked;
+  tap one to go there. Chapter titles are searchable.
 - When the whole session is done, it gets a summary at the top with key points and action items
   (taken from the talk and your notes), and a title if it still has its date-and-time name.
 - It runs at low priority with two CPU threads while recording, so live transcription keeps up, and

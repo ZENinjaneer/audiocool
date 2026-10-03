@@ -27,7 +27,9 @@ object SessionJson {
         }
         if (s.chapterSummaries.isNotEmpty()) {
             put("chapterSummaries", JSONArray().apply {
-                s.chapterSummaries.forEach { put(JSONObject().put("key", it.key).put("text", it.text).put("basis", it.basis).put("model", it.model)) }
+                s.chapterSummaries.forEach { c ->
+                    put(JSONObject().put("key", c.key).put("text", c.text).put("basis", c.basis).put("model", c.model).apply { c.title?.let { put("title", it) } })
+                }
             })
         }
         s.summary?.let { sum ->
@@ -133,7 +135,7 @@ object SessionJson {
             chapterSummaries = o.optJSONArray("chapterSummaries")?.let { a ->
                 List(a.length()) { i ->
                     val c = a.getJSONObject(i)
-                    ChapterSummary(c.getString("key"), c.getString("text"), c.optString("basis"), c.optString("model"))
+                    ChapterSummary(c.getString("key"), c.getString("text"), c.optString("basis"), c.optString("model"), c.optString("title").takeIf { it.isNotBlank() })
                 }
             }.orEmpty(),
             summary = o.optJSONObject("summary")?.let { sum ->

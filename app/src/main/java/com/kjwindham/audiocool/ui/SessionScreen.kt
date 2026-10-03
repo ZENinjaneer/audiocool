@@ -145,6 +145,7 @@ import com.kjwindham.audiocool.summarize.AskPrompts
 import com.kjwindham.audiocool.summarize.Moment
 import com.kjwindham.audiocool.summarize.Organizer
 import com.kjwindham.audiocool.summarize.SummaryController
+import com.kjwindham.audiocool.summarize.parseChapterKey
 import com.kjwindham.audiocool.transcribe.LiveTranscription
 import com.kjwindham.audiocool.transcribe.SpeechModel
 import com.kjwindham.audiocool.transcribe.TranscriptionController
@@ -226,7 +227,10 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
     var editing by remember { mutableStateOf<Note?>(null) }
     // Recordings waiting on the user to OK the one-time model download.
     var awaitingDownload by remember { mutableStateOf<List<String>?>(null) }
+    // The chapters with summaries, as the Everything view has them.
+    val chapterRows = remember(session) { timelineRows(session, TimelineMode.EVERYTHING).filterIsInstance<TimelineRow.Summary>() }
     var namingVoice by remember { mutableStateOf<Int?>(null) }
+    var showChapters by remember { mutableStateOf(false) }
     var confirmVoiceDownload by remember { mutableStateOf(false) }
     var confirmLiveDownload by remember { mutableStateOf(false) }
     // The photo note being looked at full screen.
@@ -600,6 +604,12 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
                                     },
                                 )
                             }
+                            if (chapterRows.size > 1) {
+                                DropdownMenuItem(text = { Text("Chapters") }, onClick = {
+                                    showMenu = false
+                                    showChapters = true
+                                })
+                            }
                             if (!recordingHere && session.recordings.any { it.durationMs > 0 } && !transcription.isFindingSpeakers(session.id)) {
                                 DropdownMenuItem(text = { Text(if (session.voices.isEmpty()) "Who said what" else "Who said what again") }, onClick = {
                                     showMenu = false
@@ -806,6 +816,25 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
         }
     }
 
+    if (showChapters) {
+        // The chapter playing: the last to start before where playback is.
+        val playingChapter = position?.let { at ->
+            chapterRows.lastOrNull { c -> parseChapterKey(c.chapterKey)?.let { (recId, ms) -> recId == selected?.id && ms <= at } == true }
+        }
+        ChaptersSheet(
+            session,
+            chapterRows,
+            playingChapter,
+            onPick = { c ->
+                showChapters = false
+                // As a found chapter summary: shown (whatever the view), outlined, and playing from its start.
+                parseChapterKey(c.chapterKey)?.let { (recId, ms) ->
+                    openHit(SearchHit(session.id, HitKind.SUMMARY, c.text, emptyList(), recId, ms, chapterKey = c.chapterKey))
+                }
+            },
+            onDismiss = { showChapters = false },
+        )
+    }
     namingVoice?.let { id ->
         NameVoiceDialog(session, id, onPlay = { recId, at -> playFrom(recId, at) }, onDismiss = { namingVoice = null })
     }

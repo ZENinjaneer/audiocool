@@ -16,7 +16,7 @@ object SummaryPrompts {
     const val SYSTEM = "You summarize recorded talks, lectures and meetings for the person who recorded them. " +
         "Use only what's in the material. Be concrete: keep names, numbers and claims. No preamble."
 
-    const val CHAPTER_TOKENS = 120
+    const val CHAPTER_TOKENS = 140
     const val SESSION_TOKENS = 450
 
     private const val ASK_JSON = "Reply as JSON with title (at most 8 words), summary (2 to 4 sentences), " +
@@ -26,10 +26,21 @@ object SummaryPrompts {
     private const val SESSION_WORDS = 2_200
 
     fun chapter(c: Chapter): String = buildString {
-        append(if (c.continued) "Summarize this part of the talk (it continues the part before)" else "Summarize this part of the talk")
-        appendLine(" in 1 to 3 sentences, at most 60 words.")
+        append(if (c.continued) "Give this part of the talk (it continues the part before)" else "Give this part of the talk")
+        appendLine(" a short title of 2 to 6 words, and summarize it in 1 to 3 sentences, at most 60 words.")
+        appendLine("Reply as two lines: Title: ... and Summary: ...")
         appendLine()
         appendMaterial(c)
+    }
+
+    /** The title and summary in a reply to [chapter]; a reply without the two lines is all summary. */
+    fun parseChapter(reply: String): Pair<String?, String>? {
+        val lines = reply.trim().removeSurrounding("```").lines().map { it.replace("**", "").trim() }.filter { it.isNotEmpty() }
+        val titleLine = lines.firstOrNull { it.startsWith("title:", ignoreCase = true) }
+        val title = titleLine?.substringAfter(':')?.trim()?.trim('"', '“', '”', '.')?.takeIf { it.isNotEmpty() && it.length <= 60 }
+        val rest = lines.filter { it !== titleLine }.joinToString(" ")
+        val summary = cleanChapter(rest) ?: return null
+        return title to summary
     }
 
     /**

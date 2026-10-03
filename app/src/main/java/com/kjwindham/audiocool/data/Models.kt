@@ -67,6 +67,8 @@ data class ChapterSummary(
     val basis: String,
     /** Which model made it, and where: on the phone or on the desktop. */
     val model: String,
+    /** A few words saying what the chapter is about. */
+    val title: String? = null,
 )
 
 /** The whole session, summarized from its chapters' summaries and the notes. */

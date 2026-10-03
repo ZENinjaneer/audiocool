@@ -60,9 +60,9 @@ class SummaryFlowTest {
 
         override fun reply(prompt: String, maxTokens: Int): String {
             synchronized(prompts) { prompts += prompt }
-            return if (prompt.startsWith("Summarize this part")) {
+            return if (prompt.startsWith("Give this part")) {
                 val said = prompt.substringAfter("What was said:\n", "").trim().substringBefore(".")
-                "The speaker covers: $said."
+                "Title: ${said.split(' ').take(3).joinToString(" ")}\nSummary: The speaker covers: $said."
             } else {
                 "```json\n{\"title\": \"Running Models on Phones\", \"summary\": \"A talk on fitting models onto phones.\", " +
                     "\"keyPoints\": [\"Quantize the weights.\", \"Measure on real phones.\"], \"actionItems\": [\"Look up calibration.\"]}\n```"
@@ -111,6 +111,7 @@ class SummaryFlowTest {
             done.chapterSummaries.map { it.key }.sorted().let { keys -> keys.sortedBy { it.substringAfterLast(':').toLong() } },
         )
         assertEquals("The speaker covers: Quantization makes models small.", done.chapterSummaries.single { it.key == chapterKey(rec.id, 50_000) }.text)
+        assertEquals("Quantization makes models", done.chapterSummaries.single { it.key == chapterKey(rec.id, 50_000) }.title)
         assertEquals("A talk on fitting models onto phones.", done.summary!!.text)
         assertEquals(listOf("Look up calibration."), done.summary!!.actionItems)
         // Its date-and-time name gives way to the summary's title.

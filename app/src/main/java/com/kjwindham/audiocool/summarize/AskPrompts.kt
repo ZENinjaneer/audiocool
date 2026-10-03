@@ -27,15 +27,6 @@ object AskPrompts {
     private const val MAX_PASSAGES = 8
     private const val MAX_WORDS = 1_200
 
-    private val STOP = setOf(
-        "a", "an", "the", "and", "or", "but", "of", "to", "in", "on", "at", "for", "with", "by", "from", "about", "as", "into",
-        "is", "are", "was", "were", "be", "been", "being", "do", "does", "did", "done", "have", "has", "had", "it", "its", "this",
-        "that", "these", "those", "there", "here", "what", "which", "who", "whom", "whose", "when", "where", "why", "how", "i",
-        "you", "he", "she", "we", "they", "me", "him", "her", "us", "them", "my", "your", "our", "their", "can", "could", "would",
-        "should", "will", "shall", "may", "might", "must", "not", "no", "so", "if", "then", "than", "too", "very", "just", "also",
-        "say", "said", "says", "tell", "talk", "talked", "mention", "mentioned", "lecture", "session", "speaker", "any", "some",
-    )
-
     /** Whether [query] reads as a question to answer rather than words to find. */
     fun looksLikeQuestion(query: String): Boolean {
         val q = query.trim().lowercase()
@@ -60,9 +51,9 @@ object AskPrompts {
 
     /** The passages most to do with [question], in timeline order: words shared, rare ones counting for more. */
     fun relevant(passages: List<Passage>, question: String): List<Passage> {
-        val terms = words(question).filter { it !in STOP }.toSet()
+        val terms = Words.content(question).toSet()
         if (terms.isEmpty()) return emptyList()
-        val docs = passages.map { words(it.text) }
+        val docs = passages.map { Words.all(it.text) }
         val df = terms.associateWith { t -> docs.count { t in it } }
         val scored = passages.indices.map { i ->
             val counts = docs[i].groupingBy { it }.eachCount()
@@ -128,16 +119,4 @@ object AskPrompts {
 
     private fun moment(session: Session, recId: String?, atMs: Long): Moment? =
         recId?.let { id -> timeLabel(session, id, atMs)?.let { Moment(id, atMs, it) } }
-
-    /** Lowercase words, a plural's s and common endings dropped, so "cycles" finds "cycle". */
-    private fun words(text: String): List<String> =
-        Regex("[\\p{L}\\p{N}']+").findAll(text.lowercase()).map { stem(it.value.trim('\'')) }.filter { it.length > 1 }.toList()
-
-    private fun stem(w: String): String = when {
-        w.length > 5 && w.endsWith("ing") -> w.dropLast(3)
-        w.length > 4 && w.endsWith("ies") -> w.dropLast(3) + "y"
-        w.length > 4 && w.endsWith("ed") -> w.dropLast(2)
-        w.length > 3 && w.endsWith("s") && !w.endsWith("ss") -> w.dropLast(1)
-        else -> w
-    }
 }

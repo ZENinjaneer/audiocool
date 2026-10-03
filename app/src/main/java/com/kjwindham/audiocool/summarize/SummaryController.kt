@@ -333,8 +333,8 @@ object SummaryController {
         try {
             when (work) {
                 is Work.Chapter -> {
-                    val text = SummaryPrompts.cleanChapter(model.reply(work.prompt, SummaryPrompts.CHAPTER_TOKENS)).orEmpty()
-                    SessionRepository.setChapterSummary(work.sessionId, ChapterSummary(work.chapter.key, text, work.basis, MODEL), work.all)
+                    val (title, text) = SummaryPrompts.parseChapter(model.reply(work.prompt, SummaryPrompts.CHAPTER_TOKENS)) ?: (null to "")
+                    SessionRepository.setChapterSummary(work.sessionId, ChapterSummary(work.chapter.key, text, work.basis, MODEL, title), work.all)
                 }
                 is Work.Whole -> {
                     val parsed = SummaryPrompts.parseSession(model.reply(work.prompt, SummaryPrompts.SESSION_TOKENS))

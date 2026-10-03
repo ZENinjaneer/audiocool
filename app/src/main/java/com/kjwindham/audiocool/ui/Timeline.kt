@@ -73,6 +73,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -92,6 +93,7 @@ import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.data.TimelineRow
 import com.kjwindham.audiocool.data.currentWord
 import com.kjwindham.audiocool.data.noteKey
+import com.kjwindham.audiocool.summarize.parseChapterKey
 import com.kjwindham.audiocool.util.noteLabel
 import com.kjwindham.audiocool.util.timeLabel
 import kotlinx.coroutines.flow.first
@@ -316,7 +318,13 @@ fun TimelinePane(
                     onDelete = { SessionRepository.deleteNote(session.id, row.note.id) },
                 )
                 is TimelineRow.Fold -> FoldDivider(row, onClick = { onFold(row) })
-                is TimelineRow.Summary -> ChapterSummaryBlock(row.text, outlined = row.key == found)
+                is TimelineRow.Summary -> ChapterSummaryBlock(
+                    row.text,
+                    outlined = row.key == found,
+                    // A chapter without a slide to start it gets a heading.
+                    heading = if (row.slide) null else chapterHeading(session, row),
+                    title = if (row.slide) null else row.title,
+                )
             }
         }
         item(key = "footer") {
@@ -671,8 +679,14 @@ private fun MarkPill(
 
 /** A chapter's summary, under its slide (or where it starts): set apart from what was said and written. */
 @Composable
-private fun ChapterSummaryBlock(text: String, outlined: Boolean) {
+private fun ChapterSummaryBlock(text: String, outlined: Boolean, heading: String? = null, title: String? = null) {
     val shape = RoundedCornerShape(12.dp)
+    if (heading != null) {
+        Column(Modifier.padding(top = 14.dp, bottom = 4.dp).semantics(mergeDescendants = true) { heading() }) {
+            Text(heading, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
+            if (title != null) Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+        }
+    }
     Row(
         Modifier
             .padding(top = 2.dp, bottom = 6.dp)
@@ -888,3 +902,9 @@ private fun copy(context: android.content.Context, label: String, text: String) 
 /** Who's speaking, for the top of a paragraph; nothing when [voice] is null. */
 private fun speakerLabel(session: Session, voice: Int?, onVoice: (Int) -> Unit): (@Composable () -> Unit)? =
     voice?.let { v -> @Composable { SpeakerLabel(session, v) { onVoice(v) } } }
+
+/** "Chapter 3 · 12:38": a chapter's number and where it starts. */
+fun chapterHeading(session: Session, row: TimelineRow.Summary): String {
+    val at = parseChapterKey(row.chapterKey)?.let { (recId, ms) -> timeLabel(session, recId, ms) }
+    return listOfNotNull("Chapter ${row.number}", at).joinToString(" · ")
+}

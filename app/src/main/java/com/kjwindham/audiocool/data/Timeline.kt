@@ -48,7 +48,11 @@ sealed interface TimelineRow {
     }
 
     /** A summary of the chapter starting here (after its photo, if it has one). */
-    data class Summary(val chapterKey: String, val text: String) : TimelineRow {
+    /**
+     * A chapter's summary, where it starts; with its [title] and [number], shown as a heading when the
+     * chapter has no slide to start it.
+     */
+    data class Summary(val chapterKey: String, val text: String, val title: String? = null, val number: Int = 0, val slide: Boolean = false) : TimelineRow {
         override val key get() = "summary:$chapterKey"
     }
 
@@ -164,10 +168,10 @@ fun timelineRows(session: Session, mode: TimelineMode): List<TimelineRow> {
     // several chapters; a session that's one chapter has just its summary at the top.)
     val chapterList = com.kjwindham.audiocool.summarize.chapters(session) { null }.filterNot { it.slight }
     if (chapterList.size > 1) {
-        for (c in chapterList) {
-            val text = session.chapterSummaries.firstOrNull { it.key == c.key }?.text?.takeIf { it.isNotBlank() } ?: continue
-            val rec = session.recording(c.recId) ?: continue
-            placed += Placed(rec.createdAt + c.startMs, 0, Long.MAX_VALUE, TimelineRow.Summary(c.key, text))
+        chapterList.forEachIndexed { i, c ->
+            val summary = session.chapterSummaries.firstOrNull { it.key == c.key }?.takeIf { it.text.isNotBlank() } ?: return@forEachIndexed
+            val rec = session.recording(c.recId) ?: return@forEachIndexed
+            placed += Placed(rec.createdAt + c.startMs, 0, Long.MAX_VALUE, TimelineRow.Summary(c.key, summary.text, summary.title, i + 1, slide = c.photo != null))
         }
     }
     for (note in notes) {
