@@ -208,7 +208,14 @@ transcribed by bigger models on your PC's GPU; the transcript comes back to the 
 
 - **Backup:** pick a folder (⋮ › Backup & restore) and every session (audio, notes, transcript) is
   copied there automatically. The copy survives uninstalling; *Restore from a backup* brings it back.
-- **Share** sends the notes as Markdown (with the summary and transcript) plus the audio files and photos.
+- **Share** offers:
+  - **Web page**: the whole session in one .html file that opens in any browser, offline, with nothing
+    to install: the summary, chapters, slides, notes and what was said (who said it, too), and the
+    audio, made small (about 15 MB an hour). Tap a time or a word to play from there; what's playing
+    lights up word by word.
+  - **Notes and audio**: the notes as Markdown (with the summary and transcript), plus the recordings
+    and photos.
+  - **Just the audio**, and **✦ Summary** (the summary, key points and action items as text).
 
 ## The app's log
 

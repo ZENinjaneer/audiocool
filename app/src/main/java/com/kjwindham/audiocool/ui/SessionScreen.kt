@@ -142,6 +142,7 @@ import com.kjwindham.audiocool.lookup.LookUp
 import com.kjwindham.audiocool.search.HitKind
 import com.kjwindham.audiocool.search.SearchHit
 import com.kjwindham.audiocool.search.searchSession
+import com.kjwindham.audiocool.share.WebPage
 import com.kjwindham.audiocool.speakers.VoiceModel
 import com.kjwindham.audiocool.summarize.AskPrompts
 import com.kjwindham.audiocool.summarize.Moment
@@ -158,11 +159,18 @@ import com.kjwindham.audiocool.util.formatTime
 import com.kjwindham.audiocool.util.isEnterKeystroke
 import com.kjwindham.audiocool.util.noteLabel
 import com.kjwindham.audiocool.util.removeEnter
+import com.kjwindham.audiocool.util.shareAudio
+import com.kjwindham.audiocool.util.sharePage
 import com.kjwindham.audiocool.util.shareSession
+import com.kjwindham.audiocool.util.shareSummary
 import com.kjwindham.audiocool.util.timeLabel
 import java.io.File
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** A moment in one of the session's recordings. */
 private data class Stamp(val recId: String, val offsetMs: Long)
@@ -236,6 +244,10 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
     val chapterRows = remember(session) { timelineRows(session, TimelineMode.EVERYTHING).filterIsInstance<TimelineRow.Summary>() }
     var namingVoice by remember { mutableStateOf<Int?>(null) }
     var showChapters by remember { mutableStateOf(false) }
+    var sharing by remember { mutableStateOf(false) }
+    // Making the web page: how far it's got, while it's at it.
+    var pageProgress by remember { mutableStateOf<Float?>(null) }
+    var pageJob by remember { mutableStateOf<Job?>(null) }
     var confirmVoiceDownload by remember { mutableStateOf(false) }
     var confirmLiveDownload by remember { mutableStateOf(false) }
     // The photo note being looked at full screen.
@@ -581,8 +593,8 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
                     }) {
                         Icon(Icons.Filled.Search, contentDescription = if (searching) "Close search" else "Search this session")
                     }
-                    IconButton(onClick = { shareSession(context, session) }) {
-                        Icon(Icons.Filled.Share, contentDescription = "Share notes and audio")
+                    IconButton(onClick = { sharing = true }) {
+                        Icon(Icons.Filled.Share, contentDescription = "Share")
                     }
                     Box {
                         IconButton(onClick = { showMenu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
@@ -861,6 +873,61 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
                 toast("Added as a note")
             },
             onDismiss = { Explain.close() },
+        )
+    }
+    if (sharing) {
+        ShareSheet(
+            session,
+            onPage = {
+                sharing = false
+                pageProgress = 0f
+                pageJob = scope.launch {
+                    val page = withContext(Dispatchers.IO) {
+                        runCatching {
+                            WebPage.make(context, session, isCancelled = { pageJob?.isActive == false }) { p -> pageProgress = p }
+                        }
+                    }
+                    pageProgress = null
+                    page.onSuccess { sharePage(context, it, session.title) }.onFailure {
+                        if (it !is CancellationException) {
+                            Log.e("SessionScreen", "Couldn't make the web page", it)
+                            toast("Couldn't make the web page.")
+                        }
+                    }
+                }
+            },
+            onNotes = {
+                sharing = false
+                shareSession(context, session)
+            },
+            onAudio = {
+                sharing = false
+                shareAudio(context, session)
+            },
+            onSummary = {
+                sharing = false
+                shareSummary(context, session)
+            },
+            onDismiss = { sharing = false },
+        )
+    }
+    pageProgress?.let { p ->
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Making the web page") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Making the audio smaller and putting it together with the slides, notes and transcript.")
+                    LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth())
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = {
+                    pageJob?.cancel()
+                    pageProgress = null
+                }) { Text("Cancel") }
+            },
         )
     }
     if (showChapters) {

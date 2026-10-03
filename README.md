@@ -51,6 +51,8 @@
 - **Search everything.** Folders, session names, summaries, notes, slide text and every word said,
   with filters to narrow it down. Or ask a session a question: the summary model answers from the
   recording, with the moments to jump to.
+- **Share it as a web page.** One file with the audio, slides, notes and transcript, for anyone to
+  open in a browser; tap a word to hear it.
 - **Lock-screen controls.** Mark a moment, pause, stop or photograph a slide without unlocking.
 - **Spoken notes.** Hold the mic and say a note, through a headset if you like, while the phone
   keeps recording the room.

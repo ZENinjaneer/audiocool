@@ -706,7 +706,11 @@ class RecordAndNoteFlowTest {
         advance(65)
         typeNote("Key idea")
         compose.onNodeWithContentDescription("Stop recording").performClick()
-        compose.onNodeWithContentDescription("Share notes and audio").performClick()
+        compose.onNodeWithContentDescription("Share").performClick()
+        // The choices: a web page, the notes and audio, just the audio.
+        compose.onNodeWithText("Web page").assertIsDisplayed()
+        compose.onNodeWithText("Just the audio").assertIsDisplayed()
+        compose.onNodeWithText("Notes and audio").performClick()
 
         val chooser = shadowOf(app).nextStartedActivity
         assertEquals(Intent.ACTION_CHOOSER, chooser.action)
