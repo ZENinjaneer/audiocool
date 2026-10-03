@@ -175,6 +175,7 @@ fun SessionListScreen(
     val summaryState by SummaryController.state.collectAsStateWithLifecycle()
     var reviewingSuggestions by remember { mutableStateOf(false) }
     var showFolderSettings by remember { mutableStateOf(false) }
+    var showMeaning by remember { mutableStateOf(false) }
     var keepOrganized by remember { mutableStateOf(prefs.autoFile) }
     var byCalendar by remember { mutableStateOf(prefs.calendarFolders) }
     val calendarPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -292,6 +293,13 @@ fun SessionListScreen(
                                     },
                                 )
                                 DropdownMenuItem(
+                                    text = { Text("Search by meaning") },
+                                    onClick = {
+                                        showMenu = false
+                                        showMeaning = true
+                                    },
+                                )
+                                DropdownMenuItem(
                                     text = { Text("Desktop transcription") },
                                     onClick = {
                                         showMenu = false
@@ -353,8 +361,10 @@ fun SessionListScreen(
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         if (searching && query.isNotBlank()) {
+            val meaningHits = rememberMeaningHits(if (searchFolder != null) sessions.filter { it.folder == searchFolder } else sessions, query, hits)
             SearchResults(
                 hits, searched = hitsFor == query, sessions, query, Modifier.fillMaxSize().padding(padding), onOpenHit,
+                meaning = meaningHits,
                 folders = folders,
                 inFolder = searchFolder,
                 onWiden = { widened = true },
@@ -475,6 +485,7 @@ fun SessionListScreen(
             )
         } ?: run { reviewingSuggestions = false }
     }
+    if (showMeaning) MeaningDialog(onDismiss = { showMeaning = false })
     if (showFolderSettings) {
         FolderSettingsDialog(
             canSuggest = summaryState.modelReady && SummaryController.enabled,
@@ -698,6 +709,8 @@ private fun SearchResults(
     inFolder: String? = null,
     onWiden: () -> Unit = {},
     onOpenFolder: (String) -> Unit = {},
+    /** Found by meaning, not words (in [sessions]). */
+    meaning: List<SearchHit> = emptyList(),
 ) {
     val byId = remember(sessions) { sessions.associateBy { it.id } }
     var picked by rememberSaveable(stateSaver = KindsSaver) { mutableStateOf(emptySet<HitKind>()) }
@@ -706,6 +719,11 @@ private fun SearchResults(
     val folderHits = remember(shown) { shown.filter { it.kind == HitKind.FOLDER } }
     val titles = remember(shown) { shown.filter { it.kind == HitKind.TITLE } }
     val groups = remember(shown) { shown.filter { it.kind != HitKind.TITLE && it.kind != HitKind.FOLDER }.groupBy { it.sessionId } }
+    if (hits.isEmpty() && meaning.isNotEmpty()) {
+        // No word matches anything; what's close in meaning still might.
+        LazyColumn(modifier, contentPadding = PaddingValues(bottom = 24.dp)) { meaningItems(meaning, byId, onOpenHit) }
+        return
+    }
     if (hits.isEmpty()) {
         if (!searched) return // still searching
         Column(modifier.padding(24.dp)) {
@@ -762,6 +780,20 @@ private fun SearchResults(
                 HitRow(session, hit, onOpenHit)
             }
         }
+        if (picked.isEmpty()) meaningItems(meaning, byId, onOpenHit)
+        }
+    }
+}
+
+/** The results found by meaning, under their heading, each with its session. */
+private fun androidx.compose.foundation.lazy.LazyListScope.meaningItems(meaning: List<SearchHit>, byId: Map<String, Session>, onOpenHit: (SearchHit) -> Unit) {
+    if (meaning.isEmpty()) return
+    item(key = "meaning") { ByMeaningHeading() }
+    itemsIndexed(meaning, key = { i, hit -> "meaning:" + hitKey(hit, i) }) { _, hit ->
+        val session = byId[hit.sessionId] ?: return@itemsIndexed
+        Column {
+            Text(session.title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 16.dp, top = 6.dp))
+            HitRow(session, hit, onOpenHit)
         }
     }
 }

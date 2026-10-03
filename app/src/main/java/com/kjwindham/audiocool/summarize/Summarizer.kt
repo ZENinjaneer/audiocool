@@ -22,6 +22,9 @@ interface Summarizer : AutoCloseable {
 
     /** The reply to [prompt], at most [maxTokens] long. Blocks: call it on a worker thread. */
     fun reply(prompt: String, maxTokens: Int): String
+
+    /** What each of [texts] means, as the meaning model ([modelPath]) puts it: vectors of length 1. Blocks. */
+    fun embed(modelPath: String, texts: List<String>): List<FloatArray> = throw UnsupportedOperationException("No meaning model here")
 }
 
 /** Gemma 4 E2B, through LiteRT-LM. */

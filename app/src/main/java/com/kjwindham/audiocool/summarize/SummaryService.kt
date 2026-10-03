@@ -15,11 +15,13 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.kjwindham.audiocool.R
 import com.kjwindham.audiocool.data.SessionRepository
+import com.kjwindham.audiocool.search.MeaningModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -40,10 +42,17 @@ class SummaryService : Service() {
             notification(SummaryController.state.value),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0,
         )
-        if (intent?.action == ACTION_CANCEL) SummaryController.cancelDownload()
+        if (intent?.action == ACTION_CANCEL) {
+            SummaryController.cancelDownload()
+            SummaryController.cancelMeaningDownload()
+        }
         if (!started) {
             started = true
-            scope.launch { SummaryController.state.collect { getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(it)) } }
+            scope.launch {
+                SummaryController.state.combine(SummaryController.meaning) { s, _ -> s }.collect {
+                    getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(it))
+                }
+            }
             scope.launch {
                 SummaryController.busy.first { !it }
                 // A moment's grace: more work may follow straight on.
@@ -75,7 +84,22 @@ class SummaryService : Service() {
             .setOngoing(true)
             .setSilent(true)
             .setOnlyAlertOnce(true)
+        val meaning = SummaryController.meaning.value
         return when {
+            meaning.downloading -> builder
+                .setContentTitle("Downloading the meaning model")
+                .setContentText("${(meaning.progress * 100).toInt()}% of ${MeaningModel.SIZE / 1_000_000} MB")
+                .setProgress(1000, (meaning.progress * 1000).toInt(), false)
+                .addAction(0, "Stop", android.app.PendingIntent.getService(
+                    this, 0, Intent(this, SummaryService::class.java).setAction(ACTION_CANCEL),
+                    android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+                ))
+                .build()
+            meaning.indexing && state.sessionId == null -> builder
+                .setContentTitle("Getting sessions ready to search by meaning")
+                .setContentText("On your phone")
+                .setProgress(0, 0, true)
+                .build()
             state.downloading -> builder
                 .setContentTitle("Downloading the summary model")
                 .setContentText("${(state.downloadProgress * 100).toInt()}% of ${SummaryModel.SIZE / 1_000_000_000.0} GB".replace(".0 GB", " GB"))

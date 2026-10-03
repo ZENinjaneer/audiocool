@@ -1234,6 +1234,7 @@ private fun SessionSearch(
     var picked by rememberSaveable(session.id, stateSaver = KindsSaver) { mutableStateOf(emptySet<HitKind>()) }
     val shown = remember(hits, picked) { if (picked.isEmpty()) hits else hits.filter { it.kind in picked } }
     val asked = answer?.takeIf { it.question == query.trim() }
+    val meaning = rememberMeaningHits(listOf(session), query, hits)
     Column(modifier) {
         if (hits.isNotEmpty()) SearchFilters(hits, SESSION_SEARCH_KINDS, picked) { picked = picked.toggled(it) }
         LazyColumn(Modifier.weight(1f)) {
@@ -1248,6 +1249,11 @@ private fun SessionSearch(
                     Hint("Find summaries, notes, text on photos and what was said in this session." + if (canAsk) " Or ask a question about it." else "")
                 }
                 // A question with no word-for-word matches: the offer to ask it says enough.
+                // No words match, but some things are close in meaning.
+                hits.isEmpty() && meaning.isNotEmpty() -> {
+                    item(key = "meaning") { ByMeaningHeading() }
+                    itemsIndexed(meaning, key = { i, hit -> "meaning:" + hitKey(hit, i) }) { _, hit -> HitRow(session, hit, onOpen) }
+                }
                 hits.isEmpty() && (asked != null || canAsk && AskPrompts.looksLikeQuestion(query)) -> Unit
                 hits.isEmpty() -> item { Hint("Nothing here matches “${query.trim()}”.") }
                 shown.isEmpty() -> item { NothingPicked(picked, query) { picked = emptySet() } }
@@ -1261,6 +1267,10 @@ private fun SessionSearch(
                         )
                     }
                     itemsIndexed(shown, key = { i, hit -> hitKey(hit, i) }) { _, hit -> HitRow(session, hit, onOpen) }
+                    if (picked.isEmpty() && meaning.isNotEmpty()) {
+                        item(key = "meaning") { ByMeaningHeading() }
+                        itemsIndexed(meaning, key = { i, hit -> "meaning:" + hitKey(hit, i) }) { _, hit -> HitRow(session, hit, onOpen) }
+                    }
                 }
             }
         }

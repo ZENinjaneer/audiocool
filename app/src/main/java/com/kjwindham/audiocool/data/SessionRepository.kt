@@ -6,6 +6,7 @@ import android.util.AtomicFile
 import android.util.Log
 import androidx.annotation.VisibleForTesting
 import com.kjwindham.audiocool.audio.remuxAdtsToM4a
+import com.kjwindham.audiocool.search.MeaningIndex
 import com.kjwindham.audiocool.speakers.VoicePrints
 import java.io.File
 import java.io.FileNotFoundException
@@ -79,6 +80,7 @@ object SessionRepository {
         _sessions.update { list -> list.filterNot { it.id == id } }
         io.launch { sessionDir(id).deleteRecursively() }
         VoicePrints.remove(id)
+        MeaningIndex.remove(id)
     }
 
     fun addRecording(sessionId: String, rec: Recording) =

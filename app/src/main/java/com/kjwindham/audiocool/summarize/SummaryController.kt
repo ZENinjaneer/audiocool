@@ -15,10 +15,14 @@ import com.kjwindham.audiocool.data.Session
 import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.data.SessionSummary
 import com.kjwindham.audiocool.data.folderSummaries
+import com.kjwindham.audiocool.search.MeaningIndex
+import com.kjwindham.audiocool.search.MeaningModel
 import com.kjwindham.audiocool.transcribe.LiveTranscription
 import com.kjwindham.audiocool.transcribe.TranscriptionController
 import com.kjwindham.audiocool.util.Prefs
 import com.kjwindham.audiocool.util.defaultSessionTitle
+import java.util.concurrent.CancellationException
+import java.util.concurrent.Executors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -31,8 +35,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.util.concurrent.CancellationException
-import java.util.concurrent.Executors
 
 /**
  * Summaries, made on the phone in the background as they become possible: each chapter once it's
@@ -108,6 +110,9 @@ object SummaryController {
         app = context.applicationContext
         prefs = Prefs(app)
         _state.update { it.copy(modelReady = SummaryModel.isReady(app)) }
+        MeaningIndex.init(app)
+        meaningBroken = false
+        _meaning.value = MeaningState(ready = MeaningModel.isReady(app))
         // A fresh start: nothing can be due from before (tests start the app over in the same process).
         main.removeCallbacks(kick)
         kickPending = false
@@ -141,6 +146,85 @@ object SummaryController {
 
     /** The GPU was tried and didn't work. */
     val gpuFailed: Boolean get() = prefs.summaryGpu == "failed"
+
+    // ---- Searching by meaning ----
+
+    /** Search by meaning: whether its model is here (or on its way), and how many sessions are indexed. */
+    data class MeaningState(
+        val ready: Boolean = false,
+        val downloading: Boolean = false,
+        val progress: Float = 0f,
+        val indexed: Int = 0,
+        /** Indexing sessions right now. */
+        val indexing: Boolean = false,
+        val error: String? = null,
+    )
+
+    private val _meaning = MutableStateFlow(MeaningState())
+    val meaning: StateFlow<MeaningState> = _meaning.asStateFlow()
+
+    @Volatile
+    private var meaningBroken = false
+
+    /** Stands in for the meaning model in tests (with a [summarizerForTest] that can embed). */
+    @VisibleForTesting
+    var meaningForTest = false
+        set(value) {
+            field = value
+            _meaning.update { it.copy(ready = value || MeaningModel.isReady(app)) }
+        }
+
+    private const val INDEX_BATCH = 32
+
+    @Volatile
+    private var cancelMeaningDownload = false
+
+    /** Downloads the meaning model (332 MB), then indexes the sessions in the background. */
+    fun downloadMeaning() {
+        if (_meaning.value.downloading || _meaning.value.ready) return
+        cancelMeaningDownload = false
+        _meaning.update { it.copy(downloading = true, progress = 0f, error = null) }
+        _busy.value = true
+        SummaryService.start(app)
+        worker.execute {
+            val error = try {
+                MeaningModel.download(app, { cancelMeaningDownload }) { p -> _meaning.update { it.copy(progress = p) } }
+                null
+            } catch (e: Exception) {
+                if (cancelMeaningDownload) null else "Couldn't download the meaning model: ${e.message ?: e.javaClass.simpleName}"
+            }
+            _meaning.update { it.copy(downloading = false, ready = MeaningModel.isReady(app), error = error) }
+            _busy.value = false
+            main.post { schedule() }
+        }
+    }
+
+    fun cancelMeaningDownload() {
+        cancelMeaningDownload = true
+    }
+
+    fun deleteMeaning() = worker.execute {
+        closeSummarizer()
+        MeaningModel.delete(app)
+        SessionRepository.sessions.value.forEach { MeaningIndex.remove(it.id) }
+        _meaning.value = MeaningState()
+    }
+
+    /**
+     * What [query] means, for searching by meaning; [onVector] gets it (or null) on the worker thread.
+     * Ahead of everything else: someone's waiting.
+     */
+    fun meaningOf(query: String, onVector: (FloatArray?) -> Unit) {
+        if (!meaningOn) return onVector(null)
+        urgent.removeAll { it is Work.Meaning }
+        urgent += Work.Meaning(query, onVector)
+        main.post {
+            if (!running) {
+                running = true
+                worker.execute(::work)
+            }
+        }
+    }
 
     // ---- Asking about a session ----
 
@@ -223,7 +307,7 @@ object SummaryController {
 
     private val kick = Runnable {
         kickPending = false
-        if (!running && _state.value.modelReady && enabled) {
+        if (!running && (_state.value.modelReady && enabled || meaningOn)) {
             running = true
             worker.execute(::work)
         }
@@ -302,13 +386,24 @@ object SummaryController {
             override val sessionId = ""
             override val basis = ""
         }
+
+        /** What a search means ([onVector] gets it, or null), for searching by meaning. */
+        class Meaning(val query: String, val onVector: (FloatArray?) -> Unit) : Work {
+            override val sessionId = ""
+            override val basis = ""
+        }
+
+        /** [passages] of the session to add to its index for searching by meaning. */
+        class Index(override val sessionId: String, val passages: List<MeaningIndex.Passage>) : Work {
+            override val basis = "index:$sessionId"
+        }
     }
 
     private fun work() {
         var serviceStarted = false
         try {
             while (true) {
-                if (!enabled || !SummaryModel.isReady(app) && summarizerForTest == null) break
+                if (!summariesOn && !meaningOn) break
                 val next = nextWork() ?: break
                 _busy.value = true
                 if (!serviceStarted && RecorderController.state.value.status == RecorderController.Status.IDLE) {
@@ -346,6 +441,7 @@ object SummaryController {
             when (work) {
                 is Work.Ask -> answerFailed(work)
                 is Work.Request -> work.onReply(null)
+                is Work.Meaning -> work.onVector(null)
                 else -> failed += work.basis
             }
             if (work is Work.Suggest) Organizer.noneFound()
@@ -381,6 +477,16 @@ object SummaryController {
                     if (suggested.isNullOrEmpty()) Organizer.noneFound() else Organizer.offer(suggested)
                 }
                 is Work.Request -> work.onReply(model.reply(work.prompt, work.maxTokens))
+                is Work.Meaning -> work.onVector(model.embed(MeaningModel.file(app).path, listOf(work.query)).firstOrNull())
+                is Work.Index -> {
+                    _meaning.update { it.copy(indexing = true) }
+                    try {
+                        val vectors = model.embed(MeaningModel.file(app).path, work.passages.map { it.text })
+                        SessionRepository.get(work.sessionId)?.let { MeaningIndex.store(it, work.passages, vectors) }
+                    } finally {
+                        _meaning.update { it.copy(indexing = false, indexed = SessionRepository.sessions.value.count { s -> MeaningIndex.size(s.id) > 0 }) }
+                    }
+                }
                 is Work.Ask -> {
                     val (text, moments) = AskPrompts.parse(model.reply(work.prompt, AskPrompts.ANSWER_TOKENS), work.excerpts)
                     // Unless another question has been asked meanwhile.
@@ -402,18 +508,29 @@ object SummaryController {
                     }
                 }
             }
-            _state.update { it.copy(where = model.where, speed = model.lastSpeed ?: it.speed, done = it.done + if (work is Work.Ask || work is Work.Request) 0 else 1, error = null) }
+            val counts = work is Work.Chapter || work is Work.Whole
+            _state.update { it.copy(where = model.where, speed = model.lastSpeed ?: it.speed, done = it.done + if (counts) 1 else 0, error = if (counts) null else it.error) }
         } catch (e: android.os.DeadObjectException) {
             if (work is Work.Suggest) Organizer.noneFound()
             if (work is Work.Ask) answerFailed(work)
             if (work is Work.Request) work.onReply(null)
-            engineCrashed(e)
+            if (work is Work.Meaning) work.onVector(null)
+            if (work is Work.Meaning || work is Work.Index) {
+                // The meaning model took its process down: it's off until the app starts again.
+                Log.e(TAG, "The meaning model's process died", e)
+                closeSummarizer()
+                meaningBroken = true
+                _meaning.update { it.copy(error = "Search by meaning stopped working on this phone.") }
+            } else {
+                engineCrashed(e)
+            }
         } catch (e: Throwable) {
             Log.e(TAG, "Summarizing failed", e)
             if (work is Work.Suggest) Organizer.noneFound()
             when (work) {
                 is Work.Ask -> answerFailed(work)
                 is Work.Request -> work.onReply(null)
+                is Work.Meaning -> work.onVector(null)
                 else -> failed += work.basis
             }
             // A model that's failed may be in a bad state: start afresh next time.
@@ -469,6 +586,32 @@ object SummaryController {
         val transcription = TranscriptionController.state.value
         // Transcribing in the background comes first: summaries need it, and both are heavy.
         if (transcription.phase == TranscriptionController.Phase.TRANSCRIBING) return null
+        return (if (summariesOn) summaryWork(rec, transcription) else null) ?: indexing(rec, transcription)
+    }
+
+    /** Summaries are on and their model is here. */
+    private val summariesOn: Boolean get() = enabled && (SummaryModel.isReady(app) || summarizerForTest != null)
+
+    /** The meaning model is here and working (search by meaning). */
+    private val meaningOn: Boolean get() = !meaningBroken && (MeaningModel.isReady(app) || meaningForTest)
+
+    /**
+     * Search by meaning: the next passages to index, from the session changed last whose transcript is
+     * settled (not being recorded or transcribed).
+     */
+    private fun indexing(rec: RecorderController.State, transcription: TranscriptionController.State): Work? {
+        if (!meaningOn) return null
+        for (session in SessionRepository.sessions.value.sortedByDescending { it.updatedAt }) {
+            if (rec.sessionId == session.id && rec.status != RecorderController.Status.IDLE) continue
+            if (session.recordings.any { transcription.isPending(session.id, it.id) }) continue
+            if ("index:${session.id}" in failed) continue
+            val stale = MeaningIndex.stale(session)
+            if (stale.isNotEmpty()) return Work.Index(session.id, stale.take(INDEX_BATCH))
+        }
+        return null
+    }
+
+    private fun summaryWork(rec: RecorderController.State, transcription: TranscriptionController.State): Work? {
         val sessions = SessionRepository.sessions.value.sortedWith(
             compareByDescending<Session> { it.id == rec.sessionId && rec.status != RecorderController.Status.IDLE }.thenByDescending { it.updatedAt },
         )

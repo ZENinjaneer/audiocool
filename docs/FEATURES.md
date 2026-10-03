@@ -171,6 +171,11 @@ in a background process of its own.
   else opens its session and plays from that moment. Within a session, the timeline scrolls to it and
   outlines it for a moment; a part's summary plays the part from its start.
 - A session's search is kept, so 🔍 brings its results back for trying the next match.
+- **Search by meaning** (⋮ › Search by meaning on the main screen): finds things by what they mean,
+  not only their words, so "why we get sleepy" finds "adenosine builds up while you're awake". Those
+  results show under **✦ By meaning**, below the word-for-word ones, in both searches. It needs IBM's
+  Granite Embedding model (332 MB, downloaded once); sessions are read for it in the background, and
+  it runs on the phone, like the summaries (it doesn't need summaries on).
 - **Ask a session** (with summaries on): type a question in its search ("Search or ask") and press
   Enter, or tap **✦ Ask** under what you typed. The summary model reads the parts of the session most to
   do with the question (what was said, your notes, slide text) and answers in a few sentences, with the
