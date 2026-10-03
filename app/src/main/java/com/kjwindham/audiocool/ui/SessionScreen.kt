@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -38,18 +39,23 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -93,11 +99,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
@@ -133,7 +141,10 @@ import com.kjwindham.audiocool.search.HitKind
 import com.kjwindham.audiocool.search.SearchHit
 import com.kjwindham.audiocool.search.searchSession
 import com.kjwindham.audiocool.speakers.VoiceModel
+import com.kjwindham.audiocool.summarize.AskPrompts
+import com.kjwindham.audiocool.summarize.Moment
 import com.kjwindham.audiocool.summarize.Organizer
+import com.kjwindham.audiocool.summarize.SummaryController
 import com.kjwindham.audiocool.transcribe.LiveTranscription
 import com.kjwindham.audiocool.transcribe.SpeechModel
 import com.kjwindham.audiocool.transcribe.TranscriptionController
@@ -174,6 +185,10 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
     val desktopProgress by DesktopSync.progress.collectAsStateWithLifecycle()
     val dictation by Dictation.state.collectAsStateWithLifecycle()
     val waveforms by Waveform.levels.collectAsStateWithLifecycle()
+    val summaries by SummaryController.state.collectAsStateWithLifecycle()
+    val answer by SummaryController.answer.collectAsStateWithLifecycle()
+    // Questions need the summary model, and summaries on.
+    val canAsk = summaries.modelReady && SummaryController.canAsk
     val prefs = remember { Prefs(context) }
     var leadInSec by remember { mutableIntStateOf(prefs.leadInSeconds) }
     val snackbar = remember { SnackbarHostState() }
@@ -650,10 +665,18 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
                 }
             }
             if (searching) {
-                SearchField(query, onQueryChange = { query = it }, onClose = {
-                    searching = false
-                    query = ""
-                })
+                SearchField(
+                    query,
+                    onQueryChange = { query = it },
+                    onClose = {
+                        searching = false
+                        query = ""
+                        SummaryController.clearAnswer()
+                    },
+                    canAsk = canAsk,
+                    // Enter on a question asks it.
+                    onSearch = { if (canAsk && AskPrompts.looksLikeQuestion(query)) SummaryController.ask(session.id, query.trim()) },
+                )
             } else if (hasSpeech && !imeVisible) {
                 ModeSwitch(mode, ::pickMode)
             }
@@ -664,6 +687,11 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
                         query = query,
                         onOpen = ::openHit,
                         modifier = Modifier.fillMaxSize(),
+                        answer = answer?.takeIf { it.sessionId == session.id },
+                        canAsk = canAsk,
+                        onAsk = { SummaryController.ask(session.id, it) },
+                        // A moment the answer came from: there on the timeline, playing.
+                        onMoment = { m -> openHit(SearchHit(session.id, HitKind.SPEECH, "", emptyList(), recId = m.recId, atMs = m.atMs)) },
                     )
                 } else {
                     TimelinePane(
@@ -967,7 +995,7 @@ private fun ModeSwitch(mode: TimelineMode, onPick: (TimelineMode) -> Unit) {
 }
 
 @Composable
-private fun SearchField(query: String, onQueryChange: (String) -> Unit, onClose: () -> Unit) {
+private fun SearchField(query: String, onQueryChange: (String) -> Unit, onClose: () -> Unit, canAsk: Boolean = false, onSearch: () -> Unit = {}) {
     val focus = remember { FocusRequester() }
     // Back to a search from before: it's selected, so typing starts a new one.
     var value by remember { mutableStateOf(TextFieldValue(query, TextRange(0, query.length))) }
@@ -979,12 +1007,68 @@ private fun SearchField(query: String, onQueryChange: (String) -> Unit, onClose:
             onQueryChange(it.text)
         },
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).focusRequester(focus),
-        placeholder = { Text("Search notes, slides and what was said") },
+        placeholder = { Text(if (canAsk) "Search or ask" else "Search notes, slides and what was said") },
         leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
         trailingIcon = { IconButton(onClick = onClose) { Icon(Icons.Filled.Close, contentDescription = "Close search") } },
         singleLine = true,
         shape = RoundedCornerShape(24.dp),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { onSearch() }),
     )
+}
+
+/** The offer to ask the summary model about the session, under what's typed. */
+@Composable
+private fun AskRow(question: String, onAsk: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onAsk).padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        Text("✦", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.width(12.dp))
+        Text("Ask: “$question”", style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** The summary model's answer to a question about the session, with the moments it came from to jump to. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AnswerCard(answer: SummaryController.Answer, onMoment: (Moment) -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text("✦ Answer", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.width(8.dp))
+                Text("from this session", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            when {
+                answer.thinking -> {
+                    Text("Reading the session…", style = MaterialTheme.typography.bodyMedium)
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+                answer.nothingFound -> Text("Nothing in this session seems to be about that.", style = MaterialTheme.typography.bodyMedium)
+                answer.error != null -> Text(answer.error, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                else -> {
+                    Text(answer.text.orEmpty(), style = MaterialTheme.typography.bodyLarge)
+                    if (answer.moments.isNotEmpty()) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            answer.moments.forEach { m ->
+                                AssistChip(
+                                    onClick = { onMoment(m) },
+                                    label = { Text(m.label) },
+                                    leadingIcon = { Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                    modifier = Modifier.semantics { contentDescription = "Play from ${m.label}" },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /** The kinds of result a session's own search can be narrowed to. */
@@ -992,16 +1076,36 @@ private val SESSION_SEARCH_KINDS = listOf(HitKind.SUMMARY, HitKind.NOTE, HitKind
 
 /** What in the session matches the search: its summaries, notes, text on photos and things said, in timeline order. */
 @Composable
-private fun SessionSearch(session: Session, query: String, onOpen: (SearchHit) -> Unit, modifier: Modifier) {
+private fun SessionSearch(
+    session: Session,
+    query: String,
+    onOpen: (SearchHit) -> Unit,
+    modifier: Modifier,
+    answer: SummaryController.Answer? = null,
+    canAsk: Boolean = false,
+    onAsk: (String) -> Unit = {},
+    onMoment: (Moment) -> Unit = {},
+) {
     // The session's own name isn't worth finding inside it.
     val hits = remember(session, query) { searchSession(session, query).filter { it.kind != HitKind.TITLE } }
     var picked by rememberSaveable(session.id, stateSaver = KindsSaver) { mutableStateOf(emptySet<HitKind>()) }
     val shown = remember(hits, picked) { if (picked.isEmpty()) hits else hits.filter { it.kind in picked } }
+    val asked = answer?.takeIf { it.question == query.trim() }
     Column(modifier) {
         if (hits.isNotEmpty()) SearchFilters(hits, SESSION_SEARCH_KINDS, picked) { picked = picked.toggled(it) }
         LazyColumn(Modifier.weight(1f)) {
+            // Asking: the answer, once asked, above the matches; or the offer to ask.
+            if (asked != null) {
+                item { AnswerCard(asked, onMoment) }
+            } else if (canAsk && query.trim().contains(' ')) {
+                item { AskRow(query.trim()) { onAsk(query.trim()) } }
+            }
             when {
-                query.isBlank() -> item { Hint("Find summaries, notes, text on photos and what was said in this session.") }
+                query.isBlank() -> item {
+                    Hint("Find summaries, notes, text on photos and what was said in this session." + if (canAsk) " Or ask a question about it." else "")
+                }
+                // A question with no word-for-word matches: the offer to ask it says enough.
+                hits.isEmpty() && (asked != null || canAsk && AskPrompts.looksLikeQuestion(query)) -> Unit
                 hits.isEmpty() -> item { Hint("Nothing here matches “${query.trim()}”.") }
                 shown.isEmpty() -> item { NothingPicked(picked, query) { picked = emptySet() } }
                 else -> {

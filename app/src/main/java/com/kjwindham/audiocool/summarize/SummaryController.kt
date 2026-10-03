@@ -142,6 +142,61 @@ object SummaryController {
     /** The GPU was tried and didn't work. */
     val gpuFailed: Boolean get() = prefs.summaryGpu == "failed"
 
+    // ---- Asking about a session ----
+
+    /** A question about a session, and its answer once the model has one. */
+    data class Answer(
+        val sessionId: String,
+        val question: String,
+        val text: String? = null,
+        /** The moments the answer came from. */
+        val moments: List<Moment> = emptyList(),
+        val thinking: Boolean = true,
+        /** Nothing in the session had anything to do with the question. */
+        val nothingFound: Boolean = false,
+        val error: String? = null,
+    )
+
+    private val _answer = MutableStateFlow<Answer?>(null)
+    val answer: StateFlow<Answer?> = _answer.asStateFlow()
+
+    /** Whether a question can be asked: summaries are on and the model is here. */
+    val canAsk: Boolean get() = enabled && (_state.value.modelReady || summarizerForTest != null)
+
+    @Volatile
+    private var pendingAsk: Work.Ask? = null
+
+    /**
+     * Answers [question] from the session: the excerpts most to do with it, read by the summary model,
+     * before anything else it has to do (someone's waiting).
+     */
+    fun ask(sessionId: String, question: String) {
+        val session = SessionRepository.get(sessionId) ?: return
+        val excerpts = AskPrompts.relevant(AskPrompts.passages(session), question)
+        if (excerpts.isEmpty()) {
+            pendingAsk = null
+            _answer.value = Answer(sessionId, question, thinking = false, nothingFound = true)
+            return
+        }
+        _answer.value = Answer(sessionId, question)
+        pendingAsk = Work.Ask(sessionId, question, excerpts, AskPrompts.prompt(session, question, excerpts))
+        main.post {
+            if (!running && enabled) {
+                running = true
+                worker.execute(::work)
+            }
+        }
+    }
+
+    fun clearAnswer() {
+        pendingAsk = null
+        _answer.value = null
+    }
+
+    private fun answerFailed(work: Work.Ask) = _answer.update { a ->
+        if (a?.sessionId == work.sessionId && a.question == work.question) a.copy(thinking = false, error = "Couldn't answer that just now.") else a
+    }
+
     /**
      * Looks for something to summarize a moment from now (changes come in bursts). A look already due
      * stays due, so a steady stream of changes can't put it off for good.
@@ -224,6 +279,11 @@ object SummaryController {
 
         /** Which of [folders] the new session belongs in. */
         class File(override val sessionId: String, val folders: List<String>, val prompt: String, override val basis: String) : Work
+
+        /** A question about the session, from [excerpts]. */
+        class Ask(override val sessionId: String, val question: String, val excerpts: List<Passage>, val prompt: String) : Work {
+            override val basis = ""
+        }
     }
 
     private fun work() {
@@ -265,7 +325,7 @@ object SummaryController {
             summarizerFor(threads = if (RecorderController.state.value.status == RecorderController.Status.IDLE) 4 else 2)
         } catch (e: Throwable) {
             Log.e(TAG, "Couldn't start the summary model", e)
-            failed += work.basis
+            if (work is Work.Ask) answerFailed(work) else failed += work.basis
             if (work is Work.Suggest) Organizer.noneFound()
             _state.update { it.copy(error = "The summary model wouldn't start: ${e.message ?: e.javaClass.simpleName}") }
             return
@@ -298,6 +358,11 @@ object SummaryController {
                     prefs.suggestBasis = work.basis
                     if (suggested.isNullOrEmpty()) Organizer.noneFound() else Organizer.offer(suggested)
                 }
+                is Work.Ask -> {
+                    val (text, moments) = AskPrompts.parse(model.reply(work.prompt, AskPrompts.ANSWER_TOKENS), work.excerpts)
+                    // Unless another question has been asked meanwhile.
+                    _answer.update { a -> if (a?.sessionId == work.sessionId && a.question == work.question) a.copy(text = text, moments = moments, thinking = false) else a }
+                }
                 is Work.File -> {
                     val number = OrganizePrompts.parseFile(model.reply(work.prompt, OrganizePrompts.FILE_TOKENS), work.folders.size)
                     if (number == null) {
@@ -314,14 +379,15 @@ object SummaryController {
                     }
                 }
             }
-            _state.update { it.copy(where = model.where, speed = model.lastSpeed ?: it.speed, done = it.done + 1, error = null) }
+            _state.update { it.copy(where = model.where, speed = model.lastSpeed ?: it.speed, done = it.done + if (work is Work.Ask) 0 else 1, error = null) }
         } catch (e: android.os.DeadObjectException) {
             if (work is Work.Suggest) Organizer.noneFound()
+            if (work is Work.Ask) answerFailed(work)
             engineCrashed(e)
         } catch (e: Throwable) {
             Log.e(TAG, "Summarizing failed", e)
             if (work is Work.Suggest) Organizer.noneFound()
-            failed += work.basis
+            if (work is Work.Ask) answerFailed(work) else failed += work.basis
             // A model that's failed may be in a bad state: start afresh next time.
             closeSummarizer()
         }
@@ -369,6 +435,11 @@ object SummaryController {
 
     /** The next thing to summarize: chapters of the session being recorded first, then other sessions, newest first. */
     private fun nextWork(): Work? {
+        // A question first, even while transcribing: someone's waiting for it.
+        pendingAsk?.let {
+            pendingAsk = null
+            return it
+        }
         val rec = RecorderController.state.value
         val transcription = TranscriptionController.state.value
         // Transcribing in the background comes first: summaries need it, and both are heavy.

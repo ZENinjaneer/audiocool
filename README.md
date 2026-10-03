@@ -46,7 +46,8 @@
 - **Folders.** Keep each course or project together. The summary model can suggest folders, and file
   new sessions as they're summarized.
 - **Search everything.** Folders, session names, summaries, notes, slide text and every word said,
-  with filters to narrow it down.
+  with filters to narrow it down. Or ask a session a question: the summary model answers from the
+  recording, with the moments to jump to.
 - **Lock-screen controls.** Mark a moment, pause, stop or photograph a slide without unlocking.
 - **Spoken notes.** Hold the mic and say a note, through a headset if you like, while the phone
   keeps recording the room.

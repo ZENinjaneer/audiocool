@@ -155,6 +155,11 @@ in a background process of its own.
   else opens its session and plays from that moment. Within a session, the timeline scrolls to it and
   outlines it for a moment; a part's summary plays the part from its start.
 - A session's search is kept, so 🔍 brings its results back for trying the next match.
+- **Ask a session** (with summaries on): type a question in its search ("Search or ask") and press
+  Enter, or tap **✦ Ask** under what you typed. The summary model reads the parts of the session most to
+  do with the question (what was said, your notes, slide text) and answers in a few sentences, with the
+  moments it came from to tap and play. It answers from the recording only, and says so when the
+  answer isn't in it. Like the summaries, it runs on the phone.
 
 ## Lock screen
 
