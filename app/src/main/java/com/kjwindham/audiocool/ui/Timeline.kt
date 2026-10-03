@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -198,6 +199,9 @@ fun TimelinePane(
     positionMs: Long? = null,
     onPlayWord: (TimelineRow.Speech, Long) -> Unit = { _, _ -> },
     onVoice: (Int) -> Unit = {},
+    onLookUp: (String, TimelineRow.Speech) -> Unit = { _, _ -> },
+    /** Explaining a slide, when the summary model can. */
+    onExplain: ((Note) -> Unit)? = null,
 ) {
     // A paragraph says who's speaking when it's someone other than in the paragraph before.
     val speakerShown = remember(rows) {
@@ -277,6 +281,7 @@ fun TimelinePane(
                         onClick = { onPlaySpeech(row) },
                         onPlayWord = { onPlayWord(row, it) },
                         speaker = speakerLabel(session, row.voice.takeIf { row.key in speakerShown }, onVoice),
+                        onLookUp = { onLookUp(it, row) },
                     )
                 }
                 is TimelineRow.Photo -> PhotoChapter(
@@ -296,6 +301,7 @@ fun TimelinePane(
                     },
                     onOpen = { onOpenPhoto(row.note) },
                     onEdit = { onEdit(row.note) },
+                    onExplain = onExplain?.takeIf { row.note.textInPhoto != null }?.let { explain -> { explain(row.note) } },
                 )
                 is TimelineRow.Written -> NoteCard(
                     label = noteLabel(session, row.note),
@@ -348,7 +354,10 @@ private fun SpeechParagraph(
     onClick: () -> Unit,
     onPlayWord: (Long) -> Unit,
     speaker: (@Composable () -> Unit)? = null,
+    onLookUp: (String) -> Unit = {},
 ) {
+    // The word a long press was on, to look up.
+    var pressedWord by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     var menu by remember { mutableStateOf(false) }
     // Word by word: the word being said lit up, what's still to come lighter. Colors only, never a
@@ -413,27 +422,39 @@ private fun SpeechParagraph(
                     },
                     maxLines = if (row.context) 2 else Int.MAX_VALUE,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.then(
-                        if (row.words.isEmpty()) {
-                            Modifier
-                        } else {
-                            // Tap a word to play from it (the time column still plays the paragraph).
-                            Modifier.pointerInput(row.words) {
-                                detectTapGestures(
-                                    onTap = { at ->
-                                        val offset = layout?.getOffsetForPosition(at)
-                                        val tapped = offset?.let { o -> row.words.lastOrNull { it.start <= o } }
-                                        if (tapped != null) onPlayWord(tapped.atMs) else onClick()
-                                    },
-                                    onLongPress = { menu = true },
-                                )
-                            }
-                        },
-                    ),
+                    // Tap a word to play from it (the time column still plays the paragraph); a long press on
+                    // one offers to look it up.
+                    modifier = Modifier.pointerInput(row.words) {
+                        detectTapGestures(
+                            onTap = { at ->
+                                val offset = layout?.getOffsetForPosition(at)
+                                val tapped = offset?.let { o -> row.words.lastOrNull { it.start <= o } }
+                                if (tapped != null) onPlayWord(tapped.atMs) else onClick()
+                            },
+                            onLongPress = { at ->
+                                pressedWord = layout?.let { wordAt(row.text, it.getOffsetForPosition(at)) }
+                                menu = true
+                            },
+                        )
+                    },
                 )
             }
         }
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+        DropdownMenu(expanded = menu, onDismissRequest = {
+            menu = false
+            pressedWord = null
+        }) {
+            pressedWord?.let { word ->
+                DropdownMenuItem(
+                    text = { Text("Look up “$word”") },
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    onClick = {
+                        menu = false
+                        pressedWord = null
+                        onLookUp(word)
+                    },
+                )
+            }
             DropdownMenuItem(
                 text = { Text("Copy what was said") },
                 leadingIcon = { Icon(AppIcons.Copy, contentDescription = null) },
@@ -458,6 +479,7 @@ private fun PhotoChapter(
     onClick: () -> Unit,
     onOpen: () -> Unit,
     onEdit: () -> Unit,
+    onExplain: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val note = row.note
@@ -534,6 +556,16 @@ private fun PhotoChapter(
             if (size != PhotoSize.COLLAPSED) note.textInPhoto?.let { PhotoText(it) }
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            if (onExplain != null) {
+                DropdownMenuItem(
+                    text = { Text("Explain this slide") },
+                    leadingIcon = { Text("✦", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium) },
+                    onClick = {
+                        menu = false
+                        onExplain()
+                    },
+                )
+            }
             DropdownMenuItem(
                 text = { Text("View full screen") },
                 leadingIcon = { Icon(AppIcons.Image, contentDescription = null) },
@@ -907,4 +939,18 @@ private fun speakerLabel(session: Session, voice: Int?, onVoice: (Int) -> Unit):
 fun chapterHeading(session: Session, row: TimelineRow.Summary): String {
     val at = parseChapterKey(row.chapterKey)?.let { (recId, ms) -> timeLabel(session, recId, ms) }
     return listOfNotNull("Chapter ${row.number}", at).joinToString(" · ")
+}
+
+/** The word at [offset] in [text] (letters, digits, and the hyphens and apostrophes inside them), if it's on one. */
+internal fun wordAt(text: String, offset: Int): String? {
+    if (text.isEmpty()) return null
+    fun part(c: Char) = c.isLetterOrDigit() || c == '-' || c == '\''
+    var i = offset.coerceIn(0, text.length - 1)
+    if (!part(text[i]) && i > 0 && part(text[i - 1])) i--
+    if (!part(text[i])) return null
+    var start = i
+    while (start > 0 && part(text[start - 1])) start--
+    var end = i
+    while (end < text.length && part(text[end])) end++
+    return text.substring(start, end).trim('-', '\'').takeIf { it.isNotEmpty() }
 }

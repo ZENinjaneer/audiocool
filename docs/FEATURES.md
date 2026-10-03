@@ -66,6 +66,18 @@ after the paragraph it was written during; photos as chapters; ★ marks.
   photo to use it instead). The grid button on the main screen switches between the list and a
   gallery of thumbnails with each session's name underneath; search results show them too.
 
+## Look up a word, explain a slide
+
+- Long-press a word in what was said and pick **Look up “…”**. You get what it means in this talk (the
+  summary model's reading of where it comes up, when summaries are on), the moments it was said (tap
+  to play) and how often, and Wikipedia's take, with other meanings it can have.
+- Only the word goes to Wikipedia. When it means several things there, the one that fits the talk is
+  picked on the phone, from the meanings' one-line descriptions.
+- **Add as a note** keeps the meaning as a note where you looked it up; **Open** shows the article.
+- Long-press a slide photo and pick **Explain this slide** (with summaries on): an explanation in plain
+  words from the slide's text and what was said while it was up, the moments it drew on, and the
+  slide's key terms to look up.
+
 ## Who said what
 
 - ⋮ › **Who said what** tells the voices in a session apart and labels the timeline with who's

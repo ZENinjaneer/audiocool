@@ -137,6 +137,8 @@ import com.kjwindham.audiocool.data.playbackStartFor
 import com.kjwindham.audiocool.data.playingSpeechKey
 import com.kjwindham.audiocool.data.timelineRows
 import com.kjwindham.audiocool.desktop.DesktopSync
+import com.kjwindham.audiocool.lookup.Explain
+import com.kjwindham.audiocool.lookup.LookUp
 import com.kjwindham.audiocool.search.HitKind
 import com.kjwindham.audiocool.search.SearchHit
 import com.kjwindham.audiocool.search.searchSession
@@ -157,6 +159,7 @@ import com.kjwindham.audiocool.util.isEnterKeystroke
 import com.kjwindham.audiocool.util.noteLabel
 import com.kjwindham.audiocool.util.removeEnter
 import com.kjwindham.audiocool.util.shareSession
+import com.kjwindham.audiocool.util.timeLabel
 import java.io.File
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -188,6 +191,8 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
     val waveforms by Waveform.levels.collectAsStateWithLifecycle()
     val summaries by SummaryController.state.collectAsStateWithLifecycle()
     val answer by SummaryController.answer.collectAsStateWithLifecycle()
+    val lookUp by LookUp.state.collectAsStateWithLifecycle()
+    val explain by Explain.state.collectAsStateWithLifecycle()
     // Questions need the summary model, and summaries on.
     val canAsk = summaries.modelReady && SummaryController.canAsk
     val prefs = remember { Prefs(context) }
@@ -750,6 +755,10 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
                         positionMs = position,
                         onPlayWord = { row, atMs -> playFrom(row.recId, atMs) },
                         onVoice = { namingVoice = it },
+                        onLookUp = { word, row ->
+                            LookUp.start(session, word, timeLabel(session, row.recId, row.startMs)?.let { Moment(row.recId, row.startMs, it) })
+                        },
+                        onExplain = if (canAsk) { note -> Explain.start(session, note, photoTitle(note)) } else null,
                     )
                 }
                 val peekNote = peekId?.let { id -> session.notes.firstOrNull { it.id == id } }
@@ -816,6 +825,44 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
         }
     }
 
+    lookUp?.takeIf { it.sessionId == session.id }?.let { s ->
+        LookUpSheet(
+            s,
+            onMoment = { m ->
+                LookUp.close()
+                openHit(SearchHit(session.id, HitKind.SPEECH, "", emptyList(), recId = m.recId, atMs = m.atMs))
+            },
+            onAddNote = {
+                val about = s.meaning ?: s.article?.let { a -> a.description ?: a.extract.substringBefore(". ") }
+                SessionRepository.addNote(session.id, Note(newId(), "${s.word}: $about", System.currentTimeMillis(), s.from?.recId, s.from?.atMs))
+                LookUp.close()
+                toast("Added as a note")
+            },
+            onOpen = { url -> runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } },
+            onDismiss = { LookUp.close() },
+        )
+    }
+    explain?.takeIf { it.sessionId == session.id }?.let { s ->
+        val photo = session.notes.firstOrNull { it.id == s.noteId }
+        ExplainSheet(
+            s,
+            onMoment = { m ->
+                Explain.close()
+                openHit(SearchHit(session.id, HitKind.SPEECH, "", emptyList(), recId = m.recId, atMs = m.atMs))
+            },
+            onLookUp = { term ->
+                Explain.close()
+                val at = photo?.offsetMs?.let { ms -> photo.recId?.let { id -> timeLabel(session, id, ms)?.let { Moment(id, ms, it) } } }
+                LookUp.start(session, term, at, around = listOfNotNull(photo?.photoText))
+            },
+            onAddNote = {
+                SessionRepository.addNote(session.id, Note(newId(), "✦ ${s.title ?: "This slide"}: ${s.text}", System.currentTimeMillis(), photo?.recId, photo?.offsetMs))
+                Explain.close()
+                toast("Added as a note")
+            },
+            onDismiss = { Explain.close() },
+        )
+    }
     if (showChapters) {
         // The chapter playing: the last to start before where playback is.
         val playingChapter = position?.let { at ->

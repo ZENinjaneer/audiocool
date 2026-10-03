@@ -46,6 +46,8 @@
   items, written on the phone by Google's Gemma 4.
 - **Folders.** Keep each course or project together. The summary model can suggest folders, and file
   new sessions as they're summarized.
+- **Look things up.** Long-press a word in what was said for what it means in the talk, where it
+  came up and what Wikipedia says; or have the summary model explain a slide.
 - **Search everything.** Folders, session names, summaries, notes, slide text and every word said,
   with filters to narrow it down. Or ask a session a question: the summary model answers from the
   recording, with the moments to jump to.
