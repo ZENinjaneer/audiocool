@@ -14,17 +14,23 @@ import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.os.Looper
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.core.content.ContextCompat
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -39,26 +45,20 @@ import com.kjwindham.audiocool.data.Recording
 import com.kjwindham.audiocool.data.Session
 import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.data.SessionSummary
+import com.kjwindham.audiocool.data.SpeakerTurn
 import com.kjwindham.audiocool.data.TimelineMode
+import com.kjwindham.audiocool.data.TimelineRow
 import com.kjwindham.audiocool.data.TranscriptSegment
+import com.kjwindham.audiocool.data.Voice
 import com.kjwindham.audiocool.data.timelineRows
+import com.kjwindham.audiocool.lookup.LookUp
+import com.kjwindham.audiocool.summarize.Summarizer
 import com.kjwindham.audiocool.summarize.SummaryController
 import com.kjwindham.audiocool.summarize.chapters
 import com.kjwindham.audiocool.transcribe.LiveTranscription
 import com.kjwindham.audiocool.transcribe.SpeechModel
 import com.kjwindham.audiocool.transcribe.TranscriptionController
 import com.kjwindham.audiocool.util.Prefs
-import org.junit.After
-import org.junit.Assume.assumeTrue
-import org.junit.Before
-import org.junit.Rule
-import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.Shadows.shadowOf
-import org.robolectric.annotation.Config
-import org.robolectric.annotation.GraphicsMode
-import org.robolectric.shadows.ShadowMediaPlayer
-import org.robolectric.shadows.util.DataSource
 import java.io.File
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
@@ -71,6 +71,17 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import org.junit.After
+import org.junit.Assume.assumeTrue
+import org.junit.Before
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.ShadowMediaPlayer
+import org.robolectric.shadows.util.DataSource
 
 /**
  * The screenshots in the README, made from a demo library: a lecture on sleep with its slides, notes,
@@ -186,11 +197,105 @@ class ReadmeScreenshots {
     }
 
     @Test
+    fun whoSaidWhat() {
+        val review = designReview()
+        open(review)
+        scrollTo(review, timelineRows(SessionRepository.get(review.id)!!, TimelineMode.EVERYTHING).first { it is TimelineRow.Speech && it.text.startsWith("Step one") }.key, TimelineMode.EVERYTHING)
+        screenshot("speakers")
+    }
+
+    @Test
+    fun askThisSession() {
+        Prefs(app).summaries = true
+        SummaryController.useForTest {
+            object : Summarizer {
+                override val where = "CPU (4 threads)"
+                override val lastSpeed = 300.0 to 12.0
+                override fun reply(prompt: String, maxTokens: Int): String {
+                    fun number(start: String) = Regex("\\[(\\d+)] \\([^)]*\\) $start").find(prompt)?.groupValues?.get(1) ?: "1"
+                    return "Mostly adenosine: it builds up in your brain the whole time you're awake, so the longer you're up, the stronger the pull to sleep [${number("Adenosine builds up")}]. " +
+                        "Caffeine only hides it for a while, by blocking adenosine receptors [${number("Caffeine works")}]."
+                }
+                override fun close() {}
+            }
+        }
+        try {
+            val talk = sleepTalk()
+            open(talk)
+            compose.onNodeWithContentDescription("Search this session").performClick()
+            // The search box (not the note box below it) has the focus.
+            compose.onNode(hasSetTextAction() and isFocused()).performTextInput("Why do we get sleepy?")
+            compose.onNode(hasSetTextAction() and isFocused()).performImeAction()
+            val answered = CountDownLatch(1)
+            shadowOf(Looper.getMainLooper()).idle()
+            SummaryController.afterQueued { answered.countDown() }
+            answered.await(10, TimeUnit.SECONDS)
+            screenshot("ask")
+        } finally {
+            SummaryController.clearAnswer()
+            SummaryController.useForTest(null)
+            Prefs(app).summaries = false
+        }
+    }
+
+    @Test
+    fun lookUpAWord() {
+        Prefs(app).summaries = true
+        SummaryController.useForTest {
+            object : Summarizer {
+                override val where = "CPU (4 threads)"
+                override val lastSpeed = 300.0 to 12.0
+                override fun reply(prompt: String, maxTokens: Int) = "Rapid eye movement sleep: the dreaming stage, packed into the last cycles of the night."
+                override fun close() {}
+            }
+        }
+        LookUp.fetchForTest = { url ->
+            when {
+                url.endsWith("/page/summary/REM") -> "{\"type\": \"disambiguation\", \"title\": \"Rem\"}"
+                url.contains("titles=REM") -> "{\"query\": {\"pages\": [{\"title\": \"Rapid eye movement sleep\", \"description\": \"Phase of sleep characterized by rapid eye movements\"}, " +
+                    "{\"title\": \"R.E.M.\", \"description\": \"American rock band\"}, {\"title\": \"Roentgen equivalent man\", \"description\": \"Radiation unit\"}]}}"
+                url.contains("/page/summary/Rapid%20eye") -> "{\"type\": \"standard\", \"title\": \"Rapid eye movement sleep\", \"extract\": \"Rapid eye movement sleep is a unique phase of sleep in mammals and birds, " +
+                    "characterized by random rapid movement of the eyes, low muscle tone throughout the body, and the propensity of the sleeper to dream vividly.\", " +
+                    "\"content_urls\": {\"mobile\": {\"page\": \"https://en.m.wikipedia.org/wiki/Rapid_eye_movement_sleep\"}}}"
+                else -> null
+            }
+        }
+        try {
+            val talk = sleepTalk()
+            open(talk)
+            val row = timelineRows(SessionRepository.get(talk.id)!!, TimelineMode.EVERYTHING).first { it is TimelineRow.Speech && it.text.contains("up into REM") } as TimelineRow.Speech
+            scrollTo(talk, row.key, TimelineMode.EVERYTHING)
+            val node = compose.onNodeWithText(row.text, useUnmergedTree = true)
+            val layouts = mutableListOf<TextLayoutResult>()
+            node.fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
+            val box = layouts.single().getBoundingBox(row.text.indexOf("REM") + 1)
+            node.performTouchInput { longClick(box.center) }
+            compose.onNodeWithText("Look up “REM”").performClick()
+            repeat(2) {
+                shadowOf(Looper.getMainLooper()).idle()
+                val model = CountDownLatch(1)
+                SummaryController.afterQueued { model.countDown() }
+                model.await(10, TimeUnit.SECONDS)
+                val web = CountDownLatch(1)
+                LookUp.afterQueued { web.countDown() }
+                web.await(10, TimeUnit.SECONDS)
+            }
+            screenshot("lookup")
+        } finally {
+            LookUp.close()
+            LookUp.fetchForTest = null
+            SummaryController.useForTest(null)
+            Prefs(app).summaries = false
+        }
+    }
+
+    @Test
     @Config(qualifiers = "+night")
     fun darkMode() {
         val talk = sleepTalk()
         open(talk)
-        play(talk, "13:56")
+        // Mid-sentence, so the word being said is lit.
+        play(talk, "14:12")
         screenshot("dark")
     }
 
@@ -282,9 +387,10 @@ class ReadmeScreenshots {
             "A clock in the brain keeps a roughly 24-hour rhythm, set by morning light and pushed later by evening screens. Caffeine's five-to-six-hour half-life keeps afternoon coffee active at bedtime.",
             "Five habits help most: the same wake time every day, morning daylight, caffeine before noon, a cool and dark bedroom, and half an hour without screens before bed.",
         )
+        val titles = listOf("Why we get sleepy", "Sleep cycles", "Sleep and memory", "The body clock", "Sleeping better")
         val keys = parts.map { it.key }.toSet()
-        parts.zip(summaries).forEach { (part, text) ->
-            SessionRepository.setChapterSummary(talk.id, ChapterSummary(part.key, text, "demo", SummaryController.MODEL), keys)
+        parts.zip(summaries.zip(titles)).forEach { (part, summary) ->
+            SessionRepository.setChapterSummary(talk.id, ChapterSummary(part.key, summary.first, "demo", SummaryController.MODEL, summary.second), keys)
         }
         SessionRepository.setSessionSummary(
             talk.id,
@@ -354,14 +460,31 @@ class ReadmeScreenshots {
         notes(lecture, "SN2 = one step, inverts", "Tertiary → SN1", "Practice set due Friday", "Polar aprotic favors SN2", "Ask about E1 vs SN1", "Draw the mechanism for #4")
     }
 
-    private fun designReview() {
+    private fun designReview(): Demo {
         val review = session(
             "demo-design", "Design Review: Onboarding", on(Calendar.SEPTEMBER, 30, 11, 0), 1_720_000,
-            listOf(said("00:10", "00:45", "Let's walk through the new sign-up flow, screen by screen.")),
+            listOf(
+                said("00:10", "00:45", "Let's walk through the new sign-up flow, screen by screen."),
+                said("02:14", "02:38", "Step one is the Google button, and most people tap it right away."),
+                said("02:41", "02:55", "Do we still need the email field there? Most people will tap Google."),
+                said("02:58", "03:16", "We keep it for schools that don't use Google accounts."),
+                said("03:20", "03:41", "Analytics says forty-one percent drop off at the permissions step."),
+                said("03:44", "03:58", "Then that's the one to fix first."),
+                said("04:02", "04:20", "Could we ask for permissions after the first win instead?"),
+            ),
+        )
+        SessionRepository.setSpeakers(
+            review.id, review.recId,
+            listOf(
+                SpeakerTurn(t("00:10"), t("00:45"), 0), SpeakerTurn(t("02:14"), t("02:38"), 2), SpeakerTurn(t("02:41"), t("02:55"), 1), SpeakerTurn(t("02:58"), t("03:16"), 2),
+                SpeakerTurn(t("03:20"), t("03:41"), 3), SpeakerTurn(t("03:44"), t("03:58"), 0), SpeakerTurn(t("04:02"), t("04:20"), 1),
+            ),
+            listOf(Voice(0, "Priya"), Voice(1, "Sam"), Voice(2, "Me"), Voice(3)),
         )
         slide(review, "d1", "00:20", Look.MINT, Art.PHONE, "Onboarding v3", "Three steps, not five", centered = true)
         slide(review, "d2", "14:30", Look.MINT, Art.NONE, "Where people drop off", "Step 3: permissions", "41% leave here")
         notes(review, "Move permissions after the first win", "Skip button on step 2", "Test with 5 new users", "Copy: shorter headline", "Follow up with Priya on analytics")
+        return review
     }
 
     private fun machineLearning() {
@@ -617,7 +740,12 @@ class ReadmeScreenshots {
 
     private fun render(): Bitmap {
         val view = compose.activity.window.decorView
-        return Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888).also { view.draw(Canvas(it)) }
+        return Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888).also {
+            val canvas = Canvas(it)
+            view.draw(canvas)
+            // A sheet or dialog is a window of its own, over the screen.
+            org.robolectric.shadows.ShadowDialog.getLatestDialog()?.takeIf { d -> d.isShowing }?.window?.decorView?.draw(canvas)
+        }
     }
 
     /**
@@ -698,7 +826,12 @@ class ReadmeScreenshots {
 
     private fun t(mmss: String): Long = mmss.split(":").let { (m, s) -> (m.toLong() * 60 + s.toLong()) * 1000 }
 
-    private fun said(from: String, to: String, text: String) = TranscriptSegment(t(from), t(to), text)
+    /** A phrase, its words timed evenly across it (as the speech model times them, near enough). */
+    private fun said(from: String, to: String, text: String): TranscriptSegment {
+        val words = text.split(' ')
+        val step = (t(to) - t(from)) / words.size
+        return TranscriptSegment(t(from), t(to), text, words.indices.map { (it * step).toInt() })
+    }
 
     private fun on(month: Int, day: Int, hour: Int, minute: Int): Long =
         Calendar.getInstance().apply { set(2026, month, day, hour, minute, 0); set(Calendar.MILLISECOND, 0) }.timeInMillis

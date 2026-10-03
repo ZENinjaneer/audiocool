@@ -29,37 +29,50 @@
 
 ## What it does
 
+**While you record**
+
 - **Notes that remember the moment.** Each note is linked to the second you started typing it. Tap
   it later to hear what was being said.
-- **Live transcript.** NVIDIA's Parakeet model writes down what's said as you record, right on
-  your phone. On playback each word lights up as it's said; tap a word to hear it.
+- **Live transcript.** NVIDIA's Parakeet model writes down what's said as you record, right on your
+  phone.
 - **Slides become chapters.** Snap a slide and it lands where it was shown. Its text is read, made
   searchable, and used to name the session.
 - **Hands-free slides (beta).** Prop the phone up facing the screen and it photographs each new slide
   by itself, skipping repeats and keeping one photo per slide as its bullet points appear.
+- **Spoken notes.** Hold the mic and say a note, through a headset if you like, while the phone
+  keeps recording the room.
+- **Lock-screen controls.** Mark a moment, pause, stop or photograph a slide without unlocking.
+
+**Playing it back**
+
 - **One timeline.** What was said, your notes, ★ marks and photos, in order. Show everything, notes
-  with the talk around them, or just your notes.
+  with the talk around them, or just your notes. Each word lights up as it's said; tap one to hear it.
 - **A waveform to scrub.** Drag through the recording, or tap a marker for a quick preview before
   you jump there.
+- **Who said what.** For meetings: each paragraph says who's speaking. Name a voice once and it's
+  recognized in later recordings; the voiceprints stay on your phone.
+- **Look things up.** Long-press a word for what it means in the talk, where it came up and what
+  Wikipedia says, or have a slide explained.
+
+**Summaries, answers and search**
+
 - **Summaries and chapters.** A talk comes in titled chapters (at its slides, or where it turns to
   something new), each summarized, plus a summary of the whole session with key points and action
   items, written on the phone by Google's Gemma 4.
+- **Ask a session.** Type a question into its search and the summary model answers from the
+  recording, with the moments to jump to.
+- **Search everything.** Folders, session names, summaries, notes, slide text and every word said,
+  with filters to narrow it down. Turn on search by meaning to find things by what they mean, not
+  just their words.
+
+**Keeping and sharing**
+
 - **Folders.** Keep each course or project together. The summary model can suggest folders, and file
   new sessions as they're summarized.
-- **Look things up.** Long-press a word in what was said for what it means in the talk, where it
-  came up and what Wikipedia says; or have the summary model explain a slide.
-- **Search everything.** Folders, session names, summaries, notes, slide text and every word said,
-  with filters to narrow it down, and by meaning as well as words. Or ask a session a question: the summary model answers from the
-  recording, with the moments to jump to.
 - **Share it as a web page.** One file with the audio, slides, notes and transcript, for anyone to
-  open in a browser; tap a word to hear it.
-- **Lock-screen controls.** Mark a moment, pause, stop or photograph a slide without unlocking.
-- **Spoken notes.** Hold the mic and say a note, through a headset if you like, while the phone
-  keeps recording the room.
-- **Who said what.** For meetings: each paragraph says who's speaking. Name a voice once and it's
-  recognised in later recordings; the voiceprints stay on your phone.
-- **Backups and sharing.** Automatic backups to a folder you pick, and sharing as Markdown with the
-  audio and photos.
+  open in a browser.
+- **Backups.** Automatic backups to a folder you pick, and sharing as Markdown with the audio and
+  photos.
 
 [More about each feature →](docs/FEATURES.md)
 
@@ -74,7 +87,12 @@
   <tr>
     <td align="center"><img src="docs/screenshots/search.png" width="250" alt="Search results for caffeine, with filters for sessions, summaries, notes and slides"><br><sub>Search everything, or pick what to search</sub></td>
     <td align="center"><img src="docs/screenshots/gallery.png" width="250" alt="Sessions as a gallery of thumbnails"><br><sub>Or browse them as a gallery</sub></td>
-    <td align="center"><img src="docs/screenshots/dark.png" width="250" alt="The timeline in dark mode, playing"><br><sub>Dark mode</sub></td>
+    <td align="center"><img src="docs/screenshots/dark.png" width="250" alt="The timeline in dark mode, playing, with the word being said lit"><br><sub>Dark mode, each word lit as it's said</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/ask.png" width="250" alt="The answer to Why do we get sleepy, from the session, with the moment to jump to"><br><sub>Ask a session a question</sub></td>
+    <td align="center"><img src="docs/screenshots/lookup.png" width="250" alt="Looking up REM: what it means in the talk, where it came up, and Wikipedia's article"><br><sub>Long-press a word to look it up</sub></td>
+    <td align="center"><img src="docs/screenshots/speakers.png" width="250" alt="A meeting's transcript, each paragraph labeled with who's speaking"><br><sub>Who said what, in meetings</sub></td>
   </tr>
 </table>
 
