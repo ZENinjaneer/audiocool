@@ -20,6 +20,7 @@ from audiocool_desktop.config import Config  # noqa: E402
 from audiocool_desktop.engines import ModelSpec, Registry  # noqa: E402
 from audiocool_desktop.engines.fake import FakeEngine  # noqa: E402
 from audiocool_desktop.server import create_app  # noqa: E402
+from audiocool_desktop.summaries import Summaries  # noqa: E402
 
 DATA = Path(__file__).parent / "data"
 T0 = 1790000000000
@@ -70,7 +71,11 @@ class Env:
         self.config = Config(self.home, library=self.library)
         specs = [ModelSpec(e.id, e.name, f"{e.name} for tests", "cuda", (lambda dev, e=e: e)) for e in self.engines]
         self.registry = Registry(specs, cuda=self.cuda)
-        self.app = App(self.config, self.registry, start_worker=self.start_worker)
+        # Summaries with a stand-in for llama.cpp's server (see test_summaries.py), not the real model.
+        from test_summaries import fake_launcher
+
+        summaries = Summaries(self.tmp / "summaries", launcher=fake_launcher(self.tmp))
+        self.app = App(self.config, self.registry, start_worker=self.start_worker, summaries=summaries)
         self.client = TestClient(create_app(self.app))
         self.remote = TestClient(create_app(self.app), client=("192.168.1.77", 40000))
 

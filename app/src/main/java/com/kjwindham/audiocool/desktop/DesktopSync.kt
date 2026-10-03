@@ -61,6 +61,7 @@ object DesktopSync {
             Pairing(info.url, info.token, desktop.name).also {
                 prefs.desktopPairing = "${it.url}\n${it.token}\n${it.name}"
                 _pairing.value = it
+                DesktopSummaries.check(force = true)
             }
         }
     }
@@ -68,6 +69,7 @@ object DesktopSync {
     fun unpair() {
         prefs.desktopPairing = ""
         _pairing.value = null
+        DesktopSummaries.forget()
     }
 
     /** Sends the session to the desktop, has its recordings transcribed there, and saves the results. */

@@ -58,7 +58,8 @@
 
 - **Summaries and chapters.** A talk comes in titled chapters (at its slides, or where it turns to
   something new), each summarized, plus a summary of the whole session with key points and action
-  items, written on the phone by Google's Gemma 4.
+  items, written on the phone by Google's Gemma 4, or by its much bigger sibling on your PC when the
+  desktop companion is within reach.
 - **Ask a session.** Type a question into its search and the summary model answers from the
   recording, with the moments to jump to.
 - **Search everything.** Folders, session names, summaries, notes, slide text and every word said,

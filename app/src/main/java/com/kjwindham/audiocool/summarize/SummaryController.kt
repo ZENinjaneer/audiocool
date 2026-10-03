@@ -15,6 +15,8 @@ import com.kjwindham.audiocool.data.Session
 import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.data.SessionSummary
 import com.kjwindham.audiocool.data.folderSummaries
+import com.kjwindham.audiocool.desktop.DesktopSummaries
+import com.kjwindham.audiocool.desktop.DesktopSync
 import com.kjwindham.audiocool.search.MeaningIndex
 import com.kjwindham.audiocool.search.MeaningModel
 import com.kjwindham.audiocool.transcribe.LiveTranscription
@@ -55,6 +57,8 @@ object SummaryController {
         val where: String? = null,
         val speed: Pair<Double, Double>? = null,
         val error: String? = null,
+        /** The paired desktop's name, while it can be reached and has its summary model (see [DesktopSummaries]). */
+        val desktop: String? = null,
     )
 
     const val MODEL = "${SummaryModel.ID}@phone"
@@ -95,11 +99,14 @@ object SummaryController {
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var watcher: Job? = null
+    private var desktopWatcher: Job? = null
 
     // Touched only on the worker thread.
     private var summarizer: Summarizer? = null
     private var summarizerThreads = 0
-    @Volatile private var running = false
+    // The worker's running, and a look was asked for meanwhile (both only touched on the main thread).
+    private var running = false
+    private var missed = false
     @Volatile private var cancelDownload = false
     // Work that failed, by basis, so it isn't retried in a loop.
     private val failed = HashSet<String>()
@@ -110,6 +117,13 @@ object SummaryController {
         app = context.applicationContext
         prefs = Prefs(app)
         _state.update { it.copy(modelReady = SummaryModel.isReady(app)) }
+        desktopWatcher?.cancel()
+        desktopWatcher = scope.launch {
+            DesktopSummaries.state.collect { d ->
+                _state.update { it.copy(desktop = d.model?.desktop) }
+                if (d.model != null) schedule()
+            }
+        }
         MeaningIndex.init(app)
         meaningBroken = false
         _meaning.value = MeaningState(ready = MeaningModel.isReady(app))
@@ -218,11 +232,16 @@ object SummaryController {
         if (!meaningOn) return onVector(null)
         urgent.removeAll { it is Work.Meaning }
         urgent += Work.Meaning(query, onVector)
-        main.post {
-            if (!running) {
-                running = true
-                worker.execute(::work)
-            }
+        startWorker()
+    }
+
+    /** Starts the worker for what's urgent; if it's busy, it takes it as it goes (or straight after). */
+    private fun startWorker() = main.post {
+        if (running) {
+            missed = true
+        } else {
+            running = true
+            worker.execute(::work)
         }
     }
 
@@ -244,8 +263,8 @@ object SummaryController {
     private val _answer = MutableStateFlow<Answer?>(null)
     val answer: StateFlow<Answer?> = _answer.asStateFlow()
 
-    /** Whether a question can be asked: summaries are on and the model is here. */
-    val canAsk: Boolean get() = enabled && (_state.value.modelReady || summarizerForTest != null)
+    /** Whether a question can be asked: summaries are on and there's a model for it (here, or on the desktop). */
+    val canAsk: Boolean get() = enabled && (_state.value.modelReady || _state.value.desktop != null || summarizerForTest != null)
 
     /** What someone's waiting for (questions, look-ups), done before the summaries. */
     private val urgent = java.util.concurrent.ConcurrentLinkedQueue<Work>()
@@ -282,11 +301,8 @@ object SummaryController {
         startUrgent()
     }
 
-    private fun startUrgent() = main.post {
-        if (!running && enabled) {
-            running = true
-            worker.execute(::work)
-        }
+    private fun startUrgent() {
+        if (enabled) startWorker()
     }
 
     private fun answerFailed(work: Work.Ask) = _answer.update { a ->
@@ -307,7 +323,12 @@ object SummaryController {
 
     private val kick = Runnable {
         kickPending = false
-        if (!running && (_state.value.modelReady && enabled || meaningOn)) {
+        if (running) {
+            missed = true
+            return@Runnable
+        }
+        // With a desktop paired, the worker looks whether it can summarize (at most once a minute).
+        if (enabled && (_state.value.modelReady || _state.value.desktop != null || DesktopSync.pairing.value != null) || meaningOn) {
             running = true
             worker.execute(::work)
         }
@@ -399,10 +420,18 @@ object SummaryController {
         }
     }
 
+    /** How many times the worker has looked for something to do; for tests. */
+    @VisibleForTesting
+    @Volatile
+    var looks = 0
+
     private fun work() {
+        looks++
         var serviceStarted = false
         try {
             while (true) {
+                // At most once a minute, so a desktop coming into reach is used from the next piece of work.
+                if (enabled && summarizerForTest == null) DesktopSummaries.check()
                 if (!summariesOn && !meaningOn) break
                 val next = nextWork() ?: break
                 _busy.value = true
@@ -414,8 +443,14 @@ object SummaryController {
                 perform(next)
             }
         } finally {
-            running = false
-            main.post { schedule() }
+            // Only a look asked for while this was busy: looking again regardless would never rest.
+            main.post {
+                running = false
+                if (missed) {
+                    missed = false
+                    schedule()
+                }
+            }
             _state.update { it.copy(sessionId = null, done = 0, total = 0) }
             if (!_state.value.downloading) _busy.value = false
             // Free the model's memory if nothing else turns up for a while.
@@ -434,7 +469,9 @@ object SummaryController {
     }
 
     private fun perform(work: Work) {
-        val model = try {
+        // Words go to the desktop's bigger model while it can be reached; meaning stays on the phone, with its index.
+        val desktop = if (work !is Work.Meaning && work !is Work.Index && summarizerForTest == null) DesktopSummaries.summarizer() else null
+        val model = desktop ?: try {
             summarizerFor(threads = if (RecorderController.state.value.status == RecorderController.Status.IDLE) 4 else 2)
         } catch (e: Throwable) {
             Log.e(TAG, "Couldn't start the summary model", e)
@@ -452,7 +489,7 @@ object SummaryController {
             when (work) {
                 is Work.Chapter -> {
                     val (title, text) = SummaryPrompts.parseChapter(model.reply(work.prompt, SummaryPrompts.CHAPTER_TOKENS)) ?: (null to "")
-                    SessionRepository.setChapterSummary(work.sessionId, ChapterSummary(work.chapter.key, text, work.basis, MODEL, title), work.all)
+                    SessionRepository.setChapterSummary(work.sessionId, ChapterSummary(work.chapter.key, text, work.basis, model.modelId, title), work.all)
                 }
                 is Work.Whole -> {
                     val parsed = SummaryPrompts.parseSession(model.reply(work.prompt, SummaryPrompts.SESSION_TOKENS))
@@ -461,7 +498,7 @@ object SummaryController {
                     } else {
                         SessionRepository.setSessionSummary(
                             work.sessionId,
-                            SessionSummary(parsed.summary, parsed.keyPoints, parsed.actionItems, parsed.title, work.basis, MODEL, System.currentTimeMillis()),
+                            SessionSummary(parsed.summary, parsed.keyPoints, parsed.actionItems, parsed.title, work.basis, model.modelId, System.currentTimeMillis()),
                         )
                         // Like a slide's title, a summary's title only replaces the date-and-time name.
                         val session = SessionRepository.get(work.sessionId)
@@ -509,7 +546,15 @@ object SummaryController {
                 }
             }
             val counts = work is Work.Chapter || work is Work.Whole
-            _state.update { it.copy(where = model.where, speed = model.lastSpeed ?: it.speed, done = it.done + if (counts) 1 else 0, error = if (counts) null else it.error) }
+            _state.update {
+                it.copy(
+                    // Where the phone's own model runs, and how fast.
+                    where = if (desktop == null) model.where else it.where,
+                    speed = if (desktop == null) model.lastSpeed ?: it.speed else it.speed,
+                    done = it.done + if (counts) 1 else 0,
+                    error = if (counts) null else it.error,
+                )
+            }
         } catch (e: android.os.DeadObjectException) {
             if (work is Work.Suggest) Organizer.noneFound()
             if (work is Work.Ask) answerFailed(work)
@@ -525,6 +570,19 @@ object SummaryController {
                 engineCrashed(e)
             }
         } catch (e: Throwable) {
+            if (desktop != null) {
+                // The desktop didn't answer: the phone's model takes over if it's here; else this waits for the desktop.
+                Log.w(TAG, "The desktop couldn't summarize", e)
+                DesktopSummaries.lost()
+                if (SummaryModel.isReady(app)) return perform(work)
+                when (work) {
+                    is Work.Ask -> answerFailed(work)
+                    is Work.Request -> work.onReply(null)
+                    is Work.Suggest -> Organizer.noneFound()
+                    else -> Unit
+                }
+                return
+            }
             Log.e(TAG, "Summarizing failed", e)
             if (work is Work.Suggest) Organizer.noneFound()
             when (work) {
@@ -589,8 +647,8 @@ object SummaryController {
         return (if (summariesOn) summaryWork(rec, transcription) else null) ?: indexing(rec, transcription)
     }
 
-    /** Summaries are on and their model is here. */
-    private val summariesOn: Boolean get() = enabled && (SummaryModel.isReady(app) || summarizerForTest != null)
+    /** Summaries are on and there's a model for them: here, or on the desktop. */
+    private val summariesOn: Boolean get() = enabled && (SummaryModel.isReady(app) || DesktopSummaries.model != null || summarizerForTest != null)
 
     /** The meaning model is here and working (search by meaning). */
     private val meaningOn: Boolean get() = !meaningBroken && (MeaningModel.isReady(app) || meaningForTest)
@@ -612,6 +670,9 @@ object SummaryController {
     }
 
     private fun summaryWork(rec: RecorderController.State, transcription: TranscriptionController.State): Work? {
+        // While the desktop can be reached, what the phone's small model wrote is written again by the desktop's bigger one.
+        val upgrade = summarizerForTest == null && DesktopSummaries.model != null
+        fun current(model: String) = !(upgrade && model == MODEL)
         val sessions = SessionRepository.sessions.value.sortedWith(
             compareByDescending<Session> { it.id == rec.sessionId && rec.status != RecorderController.Status.IDLE }.thenByDescending { it.updatedAt },
         )
@@ -624,7 +685,7 @@ object SummaryController {
                     if (!c.complete) continue
                     val prompt = SummaryPrompts.chapter(c)
                     val basis = SummaryPrompts.basis(prompt)
-                    if (basis in failed || session.chapterSummaries.any { it.key == c.key && it.basis == basis }) continue
+                    if (basis in failed || session.chapterSummaries.any { it.key == c.key && it.basis == basis && current(it.model) }) continue
                     report(session, chapters)
                     return Work.Chapter(session.id, c, prompt, basis, keys)
                 }
@@ -635,7 +696,7 @@ object SummaryController {
             if (chapters.size > 1 && chapters.any { c -> session.chapterSummaries.none { it.key == c.key } }) continue
             val prompt = SummaryPrompts.session(session, chapters, summaries)
             val basis = SummaryPrompts.basis(prompt)
-            if (basis in failed || session.summary?.basis == basis) continue
+            if (basis in failed || session.summary?.let { it.basis == basis && current(it.model) } == true) continue
             report(session, chapters)
             return Work.Whole(session.id, prompt, basis)
         }
@@ -697,7 +758,7 @@ object SummaryController {
 
     /** Whether [session] has summaries still to come (to show they're on the way). */
     fun pending(session: Session): Boolean {
-        if (!enabled || !_state.value.modelReady) return false
+        if (!enabled || !(_state.value.modelReady || _state.value.desktop != null)) return false
         val rec = RecorderController.state.value
         val chapters = chapters(session) { settledUntil(session, it, rec, TranscriptionController.state.value) }.filterNot { it.slight }
         if (chapters.isEmpty()) return false

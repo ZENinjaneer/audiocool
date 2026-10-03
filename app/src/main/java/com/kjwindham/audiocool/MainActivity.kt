@@ -23,6 +23,7 @@ import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.data.playbackStartFor
 import com.kjwindham.audiocool.search.HitKind
 import com.kjwindham.audiocool.search.SearchHit
+import com.kjwindham.audiocool.summarize.SummaryController
 import com.kjwindham.audiocool.transcribe.TranscriptionController
 import com.kjwindham.audiocool.ui.AudioCoolTheme
 import com.kjwindham.audiocool.ui.SessionListScreen
@@ -54,6 +55,8 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         // Pick up transcription that couldn't start while the app was in the background.
         TranscriptionController.startWorker()
+        // And summaries: the desktop may be within reach again.
+        SummaryController.schedule()
     }
 
     override fun onStop() {

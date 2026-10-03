@@ -6,6 +6,7 @@ import argparse
 import errno
 import logging
 import os
+import signal
 import socket
 import sys
 from pathlib import Path
@@ -77,10 +78,16 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  Library:                  {config.library}")
     print(f"  GPU:                      {gpu + ' (CUDA)' if gpu else 'none found; transcribing on the CPU'}")
     print(f"  Default model:            {registry.name_of(registry.default_id)}")
+    summaries = app.summaries.status()
+    ready = summaries["state"] == "ready"
+    print(f"  Summaries for the phone:  {summaries['model'] + ' (ready)' if ready else 'off (Settings › Summaries for the phone)'}")
     print(f"{line}\n  Pair the phone from the Pair page of the web UI (QR code). Ctrl+C stops.\n{line}\n", flush=True)
 
     import uvicorn
 
+    # uvicorn shuts down on SIGTERM, then raises it again: as an exit, so app.close() below still runs
+    # (and stops the summary model's server, which would otherwise keep its GPU memory).
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     try:
         uvicorn.run(create_app(app, port=args.port), host=args.host, port=args.port, log_level="warning", access_log=False)
     finally:

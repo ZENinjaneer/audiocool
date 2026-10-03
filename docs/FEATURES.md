@@ -124,7 +124,8 @@ after the paragraph it was written during; photos as chapters; ★ marks.
 ## Summaries
 
 Google's Gemma 4 E2B (2.6 GB, downloaded once; ⋮ › Summaries) runs on the phone through LiteRT-LM,
-in a background process of its own.
+in a background process of its own. Or a much bigger model writes them on your PC: see *On your
+desktop* below.
 
 - A session is cut into chapters: each slide photo and what was said until the next one. A talk
   without slides (or a long stretch between them) is cut where it turns to something else, every few
@@ -139,6 +140,12 @@ in a background process of its own.
   waits while recordings are transcribed.
 - If the engine fails on a phone, only its process stops; the app tries again without speculative
   decoding, then turns summaries off. The GPU is an experimental option.
+- **On your desktop:** with [AudioCool Desktop](../desktop/README.md) paired and its summary model
+  set up there (Settings › Summaries for the phone: Gemma 4 26B), the summaries, answers to
+  questions, look-ups and folder suggestions are written on the PC whenever the phone can reach it,
+  even if the phone has no model of its own. Summaries the phone wrote are written again by the
+  bigger model, and each one says where it was made. Away from the desktop, the phone's model (if
+  downloaded) takes over. Search by meaning stays on the phone.
 
 ## Folders
 
@@ -207,7 +214,8 @@ in a background process of its own.
 ## AudioCool Desktop
 
 Pair with [AudioCool Desktop](../desktop/README.md) on the same Wi-Fi and send a session to be
-transcribed by bigger models on your PC's GPU; the transcript comes back to the phone.
+transcribed by bigger models on your PC's GPU; the transcript comes back to the phone. It can also
+write the phone's summaries, with Gemma 4 26B (see *On your desktop* under Summaries).
 
 ## Backup and sharing
 

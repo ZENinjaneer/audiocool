@@ -201,6 +201,30 @@ class SummaryFlowTest {
         assertTrue(Prefs(app).summaryOfferDismissed)
     }
 
+    @Test
+    fun withNothingLeftToDoTheWorkerRests() {
+        val session = SessionRepository.create("Short talk")
+        SessionRepository.addRecording(session.id, Recording("rec1", "recording-1.m4a", 5_000, 60_000, transcript = listOf(
+            TranscriptSegment(1_000, 9_000, "Welcome to the talk on phones. Today we look at why running a language model on the phone in your pocket is now possible, and what it takes to make one fit and run fast."),
+            TranscriptSegment(20_000, 30_000, "Quantization makes models small, and measuring on real phones keeps everyone honest about how fast they really are."),
+        ), transcriptModel = "parakeet-unified-en-0.6b"))
+        letSummariesRun()
+        assertTrue(SessionRepository.get(session.id)!!.summary != null)
+        // Nothing changes for half a minute: it doesn't keep looking.
+        val before = SummaryController.looks
+        repeat(15) {
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
+            val done = CountDownLatch(1)
+            SummaryController.afterQueued { done.countDown() }
+            done.await(10, TimeUnit.SECONDS)
+        }
+        assertTrue("looked ${SummaryController.looks - before} times", SummaryController.looks - before <= 1)
+        // A change is noticed.
+        SessionRepository.rename(session.id, "Renamed")
+        letSummariesRun()
+        assertTrue(SummaryController.looks > before)
+    }
+
     private fun slide(sessionId: String, id: String, atMs: Long, title: String) {
         val bitmap = Bitmap.createBitmap(1600, 900, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.rgb(28, 32, 51)) }
         val file = SessionRepository.photoFile(sessionId, "photo-$id.jpg").apply { parentFile?.mkdirs() }

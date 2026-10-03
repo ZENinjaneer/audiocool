@@ -1128,7 +1128,37 @@ New-NetFirewallHyperVRule -Name "AudioCool-Desktop" -DisplayName "AudioCool Desk
             <div class="row small">${m.loaded ? html`<span class="badge ok">loaded</span>` : ''}<span class="badge">${icon('chip')}${m.device === 'cuda' ? 'GPU' : 'CPU'}</span>${m.status ? html`<span class="badge ${m.status === 'ready' ? '' : 'warn'}">${m.status === 'ready' ? 'downloaded' : m.status}</span>` : ''}</div>
           </div>`)}
         </section>
+        <section class="card card-pad" id="summaries"></section>
       </form>`);
+    // Summaries for the phone: the model's download, and whether it's running.
+    const renderSummaries = async () => {
+      const box = $('#summaries', el);
+      if (!box || !document.body.contains(box)) return;
+      let st;
+      try { st = await api('/summaries'); } catch (err) { return; }
+      const gb = (st.downloadBytes / 1e9).toFixed(1);
+      const pct = Math.round(st.progress * 100);
+      box.innerHTML = out(html`
+        <h2>Summaries for the phone</h2>
+        <p class="muted small">When the phone can reach this computer, it has ${st.model} write its summaries here (chapters, whole sessions, answers to questions) instead of its own much smaller model: better, and quicker on ${info.cuda ? 'this GPU' : 'this computer'}. It runs only while the phone needs it.</p>
+        ${st.state === 'ready' ? html`<div class="row small"><span class="badge ok">ready</span>${st.running ? html`<span class="badge accent">running</span>` : ''}${st.lastSeconds != null ? html`<span class="muted">last reply took ${st.lastSeconds} s</span>` : ''}<span style="flex:1"></span><button class="btn sm danger" type="button" id="sum-delete">Delete (frees ${gb} GB)</button></div>` : ''}
+        ${st.state === 'downloading' ? html`<div class="stack"><div class="progress ${pct === 0 ? 'indet' : ''}"><div style="width:${pct}%"></div></div><div class="row small"><span class="muted">Downloading ${st.model}: ${pct}% of ${gb} GB</span><span style="flex:1"></span><button class="btn sm" type="button" id="sum-cancel">Stop</button></div></div>` : ''}
+        ${st.state === 'missing' || st.state === 'error' ? html`<div class="row">${st.error ? html`<span class="badge warn">${st.error}</span>` : ''}<button class="btn primary" type="button" id="sum-download">Download ${st.model} (${gb} GB)</button></div>` : ''}
+        ${st.state === 'unsupported' ? html`<p class="muted small">Not available on this computer: it needs Linux on x86-64 (WSL counts).</p>` : ''}`);
+      const act = (id, path, method) => $(id, box)?.addEventListener('click', async () => {
+        try { await api(path, { method }); } catch (err) { toast(err.message, 'err'); }
+        renderSummaries();
+      });
+      act('#sum-download', '/summaries/download', 'POST');
+      act('#sum-cancel', '/summaries/cancel', 'POST');
+      $('#sum-delete', box)?.addEventListener('click', async () => {
+        if (!confirm(`Delete ${st.model}? The phone goes back to its own model until it's downloaded again.`)) return;
+        try { await api('/summaries', { method: 'DELETE' }); } catch (err) { toast(err.message, 'err'); }
+        renderSummaries();
+      });
+      if (st.state === 'downloading' || st.running) setTimeout(renderSummaries, st.state === 'downloading' ? 1500 : 5000);
+    };
+    renderSummaries();
     let saved = { name: s.name, defaultModel: s.defaultModel, library: s.library };
     $('#form', el).addEventListener('submit', async (e) => {
       e.preventDefault();

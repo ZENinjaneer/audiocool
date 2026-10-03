@@ -5,11 +5,12 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from . import audio, models_cache
+from . import DESKTOP_DIR, audio, models_cache
 from .config import Config
 from .engines import Registry, is_gpu_failure
 from .jobs import JobQueue
 from .library import Library
+from .summaries import Summaries
 
 log = logging.getLogger(__name__)
 
@@ -18,9 +19,11 @@ UNLOAD_AFTER_S = 600
 
 
 class App:
-    def __init__(self, config: Config, registry: Registry, start_worker: bool = True):
+    def __init__(self, config: Config, registry: Registry, start_worker: bool = True, summaries: Summaries | None = None):
         self.config = config
         self.registry = registry
+        # Gemma 4 26B for the phone's summaries, once it's downloaded (see summaries.py).
+        self.summaries = summaries or Summaries(DESKTOP_DIR / ".cache" / "summaries")
         if config.default_model and registry.get(config.default_model):
             registry.preferred_default = config.default_model
         self.library = Library(config.library, probe_duration=audio.probe_duration_ms)
@@ -35,6 +38,7 @@ class App:
     def close(self) -> None:
         self.jobs.close()
         self.registry.unload()
+        self.summaries.close()
 
     def set_library(self, path: Path) -> None:
         self.config.update(library=str(path))
@@ -57,6 +61,8 @@ class App:
 
         info = None
         engine = None
+        # The summary model and a speech model together nearly fill a 24 GB GPU: transcribing comes first.
+        self.summaries.release()
         if not self.registry.is_loaded(spec.id):
             first_use = spec.repos and models_cache.status(spec.repos) != "ready"
             progress(0.0, f"Downloading {spec.name} (first use only)" if first_use else f"Loading {spec.name}")

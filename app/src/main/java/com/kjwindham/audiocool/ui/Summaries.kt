@@ -19,6 +19,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,9 +35,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kjwindham.audiocool.data.Session
 import com.kjwindham.audiocool.data.SessionSummary
+import com.kjwindham.audiocool.desktop.DesktopSummaries
+import com.kjwindham.audiocool.desktop.DesktopSync
 import com.kjwindham.audiocool.summarize.SummaryController
 import com.kjwindham.audiocool.summarize.SummaryModel
 import com.kjwindham.audiocool.util.Prefs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * The session's summary at the top of its timeline: the summary, key points and action items once
@@ -194,13 +199,21 @@ private fun SummaryModelAbout() {
     }
 }
 
-/** Summaries, from the main menu: download the model, turn them on or off, see where they run, free the space. */
+/**
+ * Summaries, from the main menu: download the model, turn them on or off, see where they run, free the
+ * space. With a desktop paired, they can be on without the phone's model: the desktop writes them.
+ */
 @Composable
 fun SummariesDialog(onDismiss: () -> Unit) {
     val state by SummaryController.state.collectAsStateWithLifecycle()
+    val pairing by DesktopSync.pairing.collectAsStateWithLifecycle()
+    val desktop by DesktopSummaries.state.collectAsStateWithLifecycle()
     var on by remember { mutableStateOf(SummaryController.enabled) }
     var gpu by remember { mutableStateOf(SummaryController.useGpu) }
     var confirmDelete by remember { mutableStateOf(false) }
+    // Whether the desktop can write them, looked up afresh.
+    LaunchedEffect(pairing) { if (pairing != null) withContext(Dispatchers.IO) { DesktopSummaries.check(force = true) } }
+    val offer = !state.modelReady && !state.downloading && pairing == null
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Summaries") },
@@ -212,11 +225,12 @@ fun SummariesDialog(onDismiss: () -> Unit) {
                         LinearProgressIndicator(progress = { state.downloadProgress }, modifier = Modifier.fillMaxWidth())
                         OutlinedButton(onClick = { SummaryController.cancelDownload() }) { Text("Stop the download") }
                     }
-                    !state.modelReady -> {
+                    offer -> {
                         Text("A few sentences on each slide, and a summary of each session with its key points and action items, made as you record.")
                         SummaryModelAbout()
                     }
                     else -> {
+                        if (!state.modelReady) Text("A few sentences on each slide, and a summary of each session with its key points and action items.")
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("Summarize recordings", modifier = Modifier.weight(1f))
                             Switch(checked = on, onCheckedChange = {
@@ -224,42 +238,52 @@ fun SummariesDialog(onDismiss: () -> Unit) {
                                 SummaryController.setEnabled(it)
                             })
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Use the GPU")
-                                Text(
-                                    if (SummaryController.gpuFailed) "It didn't work on this phone's GPU, so it uses the CPU." else "Faster where it works; experimental.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                        pairing?.let { DesktopLine(it.name, desktop) }
+                        if (state.modelReady) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Use the GPU")
+                                    Text(
+                                        if (SummaryController.gpuFailed) "It didn't work on this phone's GPU, so it uses the CPU." else "Faster where it works; experimental.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Switch(checked = gpu, onCheckedChange = {
+                                    gpu = it
+                                    SummaryController.useGpu = it
+                                })
                             }
-                            Switch(checked = gpu, onCheckedChange = {
-                                gpu = it
-                                SummaryController.useGpu = it
-                            })
+                            Text(
+                                buildString {
+                                    append("${SummaryModel.NAME} runs on your phone, in the background")
+                                    state.where?.let { append(" (last on its ${it.replace("CPU (", "CPU, ").removeSuffix(")")})") }
+                                    append(".")
+                                    state.speed?.let { (_, write) -> append(" It last wrote about ${(write * 0.75).toInt()} words a second.") }
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            OutlinedButton(onClick = { confirmDelete = true }) { Text("Delete the model (frees ${"%.1f".format(SummaryModel.SIZE / 1e9)} GB)") }
+                        } else {
+                            Text(
+                                "To summarize away from it too, download ${SummaryModel.NAME} to the phone (${"%.1f".format(SummaryModel.SIZE / 1e9)} GB).",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            OutlinedButton(onClick = { SummaryController.download() }) { Text("Download to the phone") }
                         }
-                        Text(
-                            buildString {
-                                append("${SummaryModel.NAME} runs on your phone, in the background")
-                                state.where?.let { append(" (last on its ${it.replace("CPU (", "CPU, ").removeSuffix(")")})") }
-                                append(".")
-                                state.speed?.let { (_, write) -> append(" It last wrote about ${(write * 0.75).toInt()} words a second.") }
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        OutlinedButton(onClick = { confirmDelete = true }) { Text("Delete the model (frees ${"%.1f".format(SummaryModel.SIZE / 1e9)} GB)") }
                     }
                 }
             }
         },
         confirmButton = {
-            if (!state.modelReady && !state.downloading) {
+            if (offer) {
                 TextButton(onClick = { SummaryController.download() }) { Text("Download") }
             } else {
                 TextButton(onClick = onDismiss) { Text("Done") }
             }
         },
-        dismissButton = if (!state.modelReady && !state.downloading) {
+        dismissButton = if (offer) {
             { TextButton(onClick = onDismiss) { Text("Not now") } }
         } else {
             null
@@ -278,3 +302,20 @@ fun SummariesDialog(onDismiss: () -> Unit) {
         )
     }
 }
+
+/** Whether the paired desktop writes the summaries: it does, it could, or it can't be reached. */
+@Composable
+private fun DesktopLine(name: String, desktop: DesktopSummaries.State) {
+    val model = desktop.model
+    Text(
+        when {
+            !desktop.checked -> "Looking for $name…"
+            model != null -> "Written on $name by ${model.name} while it's on the same Wi-Fi: better, and easier on your battery."
+            desktop.reachable -> "$name could write them with a bigger model: in AudioCool Desktop, open Settings › Summaries for the phone."
+            else -> "$name isn't reachable right now."
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = if (model != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+

@@ -8,7 +8,7 @@ serves a web UI for browsing, playback, search and export.
 import os as _os
 from pathlib import Path as _Path
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 #: Version of the phone-facing HTTP API (reported by /api/v1/ping).
 API_VERSION = "1.0"

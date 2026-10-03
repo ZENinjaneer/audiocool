@@ -20,6 +20,9 @@ interface Summarizer : AutoCloseable {
     /** Reading and writing speed of the last reply, tokens per second, when known. */
     val lastSpeed: Pair<Double, Double>?
 
+    /** The model, as a summary records what wrote it. */
+    val modelId: String get() = SummaryController.MODEL
+
     /** The reply to [prompt], at most [maxTokens] long. Blocks: call it on a worker thread. */
     fun reply(prompt: String, maxTokens: Int): String
 

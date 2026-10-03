@@ -40,6 +40,7 @@ from . import sessionfmt as fmt
 from .app import App
 from .library import PHONE_MODEL, PHOTO_NAME, Entry, NotFound
 from .search import search_entries
+from .summaries import MAX_PROMPT_CHARS, MAX_TOKENS, MODEL_ID, MODEL_NAME
 from .sessionfmt import AUDIO_NAME, SESSION_ID, BadInput
 
 log = logging.getLogger(__name__)
@@ -325,7 +326,29 @@ def create_app(app: App, port: int = 8765) -> FastAPI:
 
     @api.get("/api/v1/ping")
     def ping():
-        return {"app": APP_ID, "version": API_VERSION, "name": app.config.name, "models": app.registry.models()}
+        # The phone sends its summaries' prompts here when this has a model for them.
+        summaries = {"id": MODEL_ID, "name": MODEL_NAME} if app.summaries.ready else None
+        return {"app": APP_ID, "version": API_VERSION, "name": app.config.name, "models": app.registry.models(), "summaries": summaries}
+
+    @api.post("/api/v1/reply")
+    async def reply(request: Request):
+        """What the summary model says to the phone's prompt: {"prompt", "maxTokens"} -> {"text", "model"}."""
+        body = await read_json(request)
+        if not isinstance(body, dict) or not isinstance(body.get("prompt"), str) or not body["prompt"].strip():
+            raise BadInput("expected {\"prompt\": text, \"maxTokens\": number}")
+        max_tokens = body.get("maxTokens", 512)
+        if not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or not 1 <= max_tokens <= MAX_TOKENS:
+            raise BadInput(f"maxTokens must be 1 to {MAX_TOKENS}")
+        if len(body["prompt"]) > MAX_PROMPT_CHARS:
+            raise BadInput(f"the prompt is longer than {MAX_PROMPT_CHARS} characters")
+        if not app.summaries.ready:
+            return error(503, f"{MODEL_NAME} isn't set up on this computer (Settings › Summaries for the phone)")
+        try:
+            text = await run_in_threadpool(app.summaries.reply, body["prompt"], max_tokens)
+        except Exception as e:  # noqa: BLE001 - the phone shows it, or uses its own model
+            log.warning("Summary reply failed: %s", e)
+            return error(500, str(e).splitlines()[0][:300] if str(e) else e.__class__.__name__)
+        return {"text": text, "model": MODEL_ID}
 
     @api.get("/api/v1/sessions")
     def list_sessions():
@@ -579,6 +602,25 @@ def create_app(app: App, port: int = 8765) -> FastAPI:
             return await run_in_threadpool(_import_zip, lib, archive, work / "x")
         finally:
             shutil.rmtree(work, ignore_errors=True)
+
+    @api.get("/ui/api/summaries")
+    def ui_summaries():
+        return app.summaries.status()
+
+    @api.post("/ui/api/summaries/download")
+    def ui_summaries_download():
+        app.summaries.download()
+        return app.summaries.status()
+
+    @api.post("/ui/api/summaries/cancel")
+    def ui_summaries_cancel():
+        app.summaries.cancel()
+        return app.summaries.status()
+
+    @api.delete("/ui/api/summaries")
+    async def ui_summaries_delete():
+        await run_in_threadpool(app.summaries.delete)
+        return app.summaries.status()
 
     @api.get("/ui/api/settings")
     def ui_settings():

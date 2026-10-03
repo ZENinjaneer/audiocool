@@ -12,6 +12,12 @@ back. In the browser you can browse, play, search and export everything.
 - **Transcription** with Qwen3-ASR 1.7B (most accurate open model on the Open ASR Leaderboard),
   NVIDIA Parakeet TDT 0.6B v3 (fast) or Parakeet on the CPU; sentence-level lines with accurate
   start and end times.
+- **Summaries for the phone** (optional; Settings › Summaries for the phone): Google's Gemma 4
+  26B, run by llama.cpp on the GPU, writes the phone's chapter and session summaries and answers
+  its questions whenever the phone can reach this computer. The 14.6 GB download (llama.cpp's
+  CUDA 12.8 build and Google's 4-bit QAT model, pinned versions, checked by SHA-256) goes into
+  `desktop/.cache/summaries`. The model loads on the first request (about 15 s) and unloads after
+  five minutes without one, so the GPU is free for transcribing.
 - **Web UI** (this computer only): library, search with highlighted hits, a player with note
   markers, a transcript that follows playback, inline editing, import, export (Markdown, SRT,
   TXT), pairing with a QR code, and the job queue.
@@ -31,7 +37,7 @@ and starts downloading the default model (about 6 GB, into `desktop/.cache/huggi
 
 ```
 ────────────────────────────────────────────────────────────────
-  AudioCool Desktop 1.0.0
+  AudioCool Desktop 1.1.0
 ────────────────────────────────────────────────────────────────
   Web UI (this computer):   http://localhost:8765/
   Phone URL (same Wi-Fi):   http://192.168.23.160:8765
@@ -39,6 +45,7 @@ and starts downloading the default model (about 6 GB, into `desktop/.cache/huggi
   Library:                  /home/you/AudioCool Library
   GPU:                      NVIDIA GeForce RTX 5090 Laptop GPU (CUDA)
   Default model:            Qwen3-ASR 1.7B
+  Summaries for the phone:  Gemma 4 26B (ready)
 ────────────────────────────────────────────────────────────────
 ```
 
@@ -213,8 +220,18 @@ adapters, the one with the default route first.
 {"app": "audiocool-desktop", "version": "1.0", "name": "Legion",
  "models": [{"id": "qwen3-asr-1.7b", "name": "Qwen3-ASR 1.7B", "default": true},
             {"id": "parakeet-tdt-0.6b-v3", "name": "Parakeet TDT 0.6B v3", "default": false},
-            {"id": "parakeet-tdt-0.6b-v3-cpu", "name": "Parakeet TDT 0.6B v3 (CPU)", "default": false}]}
+            {"id": "parakeet-tdt-0.6b-v3-cpu", "name": "Parakeet TDT 0.6B v3 (CPU)", "default": false}],
+ "summaries": {"id": "gemma-4-26b-a4b", "name": "Gemma 4 26B"}}
 ```
+
+`summaries` is `null` until the summary model is downloaded (Settings).
+
+**`POST /api/v1/reply`** — body `{"prompt": "<text>", "maxTokens": 140}` → `{"text": "<the model's
+reply>", "model": "gemma-4-26b-a4b"}`. The phone's summary prompts, answered by Gemma 4 26B as a
+single user turn (temperature 0.3, top-k 40, top-p 0.95, thinking off, 8,192 tokens of context);
+one at a time. 400 for an empty prompt, over 60,000 characters, or `maxTokens` outside 1–2048;
+503 when the model isn't downloaded; 500 (with the reason) when it fails. The first request after
+a while loads the model, so allow a few minutes.
 
 **`GET /api/v1/sessions`** — every session in the library, newest first.
 
@@ -296,6 +313,7 @@ None in request/response shapes or status codes. Choices the contract left open:
   on each transcribed recording.
 - Times above the year 9999 are rejected as bad input.
 - Addition: `files` and the upload route also accept note photos (see the extension above).
+- Addition: `summaries` in `ping`, and `POST /api/v1/reply` (summaries for the phone).
 - "Localhost only" for the web UI means requests from this computer: loopback, or one of the PC's
   own addresses (e.g. opening `http://192.168.x.x:8765/` on the PC itself).
 

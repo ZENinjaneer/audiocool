@@ -45,7 +45,10 @@ class DesktopClient(baseUrl: String, private val token: String) {
     private val base = baseUrl.trimEnd('/')
 
     data class Model(val id: String, val name: String, val isDefault: Boolean)
-    data class Info(val name: String, val models: List<Model>)
+
+    /** The desktop's summary model ("Gemma 4 26B"), once it's set up there. */
+    data class Summaries(val id: String, val name: String)
+    data class Info(val name: String, val models: List<Model>, val summaries: Summaries? = null)
     data class Job(val id: String, val recordingId: String, val model: String?, val status: String, val progress: Float, val error: String?) {
         val active: Boolean get() = status == "queued" || status == "running"
     }
@@ -53,8 +56,8 @@ class DesktopClient(baseUrl: String, private val token: String) {
     /** The desktop's copy of a session; [transcriptModels] marks which transcripts the desktop made. */
     data class Remote(val session: Session, val transcriptModels: Map<String, String>, val jobs: List<Job>)
 
-    fun ping(): Info {
-        val o = request("GET", "/api/v1/ping")
+    fun ping(timeoutMs: Int = 30_000): Info {
+        val o = request("GET", "/api/v1/ping", timeoutMs = timeoutMs)
         val models = o.optJSONArray("models") ?: JSONArray()
         return Info(
             name = o.optString("name", "Desktop"),
@@ -62,8 +65,16 @@ class DesktopClient(baseUrl: String, private val token: String) {
                 val m = models.getJSONObject(i)
                 Model(m.getString("id"), m.optString("name", m.getString("id")), m.optBoolean("default"))
             },
+            summaries = o.optJSONObject("summaries")?.let { Summaries(it.getString("id"), it.optString("name", it.getString("id"))) },
         )
     }
+
+    /**
+     * What the desktop's summary model says to [prompt], in at most [maxTokens] tokens. It may have to
+     * load the model first, so this can take a while.
+     */
+    fun reply(prompt: String, maxTokens: Int): String =
+        request("POST", "/api/v1/reply", JSONObject().put("prompt", prompt).put("maxTokens", maxTokens), timeoutMs = 600_000).getString("text")
 
     /** Sends the session's data; returns the audio files the desktop still needs. */
     fun putSession(session: Session, fileSizes: Map<String, Long>): List<String> {
@@ -127,8 +138,8 @@ class DesktopClient(baseUrl: String, private val token: String) {
         )
     }
 
-    private fun request(method: String, path: String, body: JSONObject? = null): JSONObject {
-        val conn = open(method, path)
+    private fun request(method: String, path: String, body: JSONObject? = null, timeoutMs: Int = 30_000): JSONObject {
+        val conn = open(method, path, timeoutMs)
         try {
             if (body != null) {
                 val bytes = body.toString().toByteArray()
@@ -145,11 +156,11 @@ class DesktopClient(baseUrl: String, private val token: String) {
         }
     }
 
-    private fun open(method: String, path: String): HttpURLConnection =
+    private fun open(method: String, path: String, timeoutMs: Int = 30_000): HttpURLConnection =
         (URL(base + path).openConnection() as HttpURLConnection).apply {
             requestMethod = method
-            connectTimeout = 5_000
-            readTimeout = 30_000
+            connectTimeout = minOf(5_000, timeoutMs)
+            readTimeout = timeoutMs
             setRequestProperty("Authorization", "Bearer $token")
             setRequestProperty("Accept", "application/json")
         }
