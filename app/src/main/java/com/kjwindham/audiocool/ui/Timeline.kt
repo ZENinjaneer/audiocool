@@ -195,7 +195,19 @@ fun TimelinePane(
     listState: LazyListState = rememberLazyListState(),
     positionMs: Long? = null,
     onPlayWord: (TimelineRow.Speech, Long) -> Unit = { _, _ -> },
+    onVoice: (Int) -> Unit = {},
 ) {
+    // A paragraph says who's speaking when it's someone other than in the paragraph before.
+    val speakerShown = remember(rows) {
+        val shown = HashSet<String>()
+        var last: Int? = null
+        for (r in rows) {
+            if (r !is TimelineRow.Speech) continue
+            if (r.voice != null && r.voice != last) shown += r.key
+            last = r.voice
+        }
+        shown
+    }
     val colors = timelineColors()
     val thumbnailId = session.thumbnailNote()?.id
     val focusNote = focusId?.let { id -> session.notes.firstOrNull { it.id == id } }
@@ -262,6 +274,7 @@ fun TimelinePane(
                         positionMs = if (row.key == playingKey) positionMs else null,
                         onClick = { onPlaySpeech(row) },
                         onPlayWord = { onPlayWord(row, it) },
+                        speaker = speakerLabel(session, row.voice.takeIf { row.key in speakerShown }, onVoice),
                     )
                 }
                 is TimelineRow.Photo -> PhotoChapter(
@@ -326,6 +339,7 @@ private fun SpeechParagraph(
     positionMs: Long?,
     onClick: () -> Unit,
     onPlayWord: (Long) -> Unit,
+    speaker: (@Composable () -> Unit)? = null,
 ) {
     val context = LocalContext.current
     var menu by remember { mutableStateOf(false) }
@@ -374,39 +388,42 @@ private fun SpeechParagraph(
                 if (dot != null) Box(Modifier.padding(top = 6.dp).size(7.dp).clip(CircleShape).background(dot))
             }
             Spacer(Modifier.width(8.dp))
-            Text(
-                shown,
-                onTextLayout = { layout = it },
-                style = if (row.context) {
-                    MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic, lineHeight = 21.sp)
-                } else {
-                    MaterialTheme.typography.bodyLarge.copy(lineHeight = 24.sp)
-                },
-                color = when {
-                    playing || tint != null -> MaterialTheme.colorScheme.onSurface
-                    row.context -> MaterialTheme.colorScheme.onSurfaceVariant
-                    else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f)
-                },
-                maxLines = if (row.context) 2 else Int.MAX_VALUE,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).then(
-                    if (row.words.isEmpty()) {
-                        Modifier
+            Column(Modifier.weight(1f)) {
+                speaker?.invoke()
+                Text(
+                    shown,
+                    onTextLayout = { layout = it },
+                    style = if (row.context) {
+                        MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic, lineHeight = 21.sp)
                     } else {
-                        // Tap a word to play from it (the time column still plays the paragraph).
-                        Modifier.pointerInput(row.words) {
-                            detectTapGestures(
-                                onTap = { at ->
-                                    val offset = layout?.getOffsetForPosition(at)
-                                    val tapped = offset?.let { o -> row.words.lastOrNull { it.start <= o } }
-                                    if (tapped != null) onPlayWord(tapped.atMs) else onClick()
-                                },
-                                onLongPress = { menu = true },
-                            )
-                        }
+                        MaterialTheme.typography.bodyLarge.copy(lineHeight = 24.sp)
                     },
-                ),
-            )
+                    color = when {
+                        playing || tint != null -> MaterialTheme.colorScheme.onSurface
+                        row.context -> MaterialTheme.colorScheme.onSurfaceVariant
+                        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f)
+                    },
+                    maxLines = if (row.context) 2 else Int.MAX_VALUE,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.then(
+                        if (row.words.isEmpty()) {
+                            Modifier
+                        } else {
+                            // Tap a word to play from it (the time column still plays the paragraph).
+                            Modifier.pointerInput(row.words) {
+                                detectTapGestures(
+                                    onTap = { at ->
+                                        val offset = layout?.getOffsetForPosition(at)
+                                        val tapped = offset?.let { o -> row.words.lastOrNull { it.start <= o } }
+                                        if (tapped != null) onPlayWord(tapped.atMs) else onClick()
+                                    },
+                                    onLongPress = { menu = true },
+                                )
+                            }
+                        },
+                    ),
+                )
+            }
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(
@@ -867,3 +884,7 @@ private fun copy(context: android.content.Context, label: String, text: String) 
     // Android 13 and up show their own confirmation.
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
 }
+
+/** Who's speaking, for the top of a paragraph; nothing when [voice] is null. */
+private fun speakerLabel(session: Session, voice: Int?, onVoice: (Int) -> Unit): (@Composable () -> Unit)? =
+    voice?.let { v -> @Composable { SpeakerLabel(session, v) { onVoice(v) } } }

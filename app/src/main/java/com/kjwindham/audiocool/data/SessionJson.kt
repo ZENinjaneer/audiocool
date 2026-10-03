@@ -2,6 +2,9 @@ package com.kjwindham.audiocool.data
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.Base64
 
 object SessionJson {
     fun encode(s: Session): String = JSONObject().apply {
@@ -12,6 +15,16 @@ object SessionJson {
         put("updatedAt", s.updatedAt)
         s.thumbnail?.let { put("thumbnail", it) }
         s.folder?.let { put("folder", it) }
+        if (s.voices.isNotEmpty()) {
+            put("voices", JSONArray().apply {
+                s.voices.forEach { v ->
+                    put(JSONObject().apply {
+                        put("id", v.id)
+                        v.name?.let { put("name", it) }
+                    })
+                }
+            })
+        }
         if (s.chapterSummaries.isNotEmpty()) {
             put("chapterSummaries", JSONArray().apply {
                 s.chapterSummaries.forEach { put(JSONObject().put("key", it.key).put("text", it.text).put("basis", it.basis).put("model", it.model)) }
@@ -36,6 +49,7 @@ object SessionJson {
                     put("createdAt", r.createdAt)
                     put("durationMs", r.durationMs)
                     r.transcriptModel?.let { put("transcriptModel", it) }
+                    r.speakers?.let { turns -> put("speakers", JSONArray().apply { turns.forEach { put(JSONArray().put(it.startMs).put(it.endMs).put(it.voice)) } }) }
                     r.transcript?.let { segments ->
                         put("transcript", JSONArray().apply {
                             segments.forEach { seg ->
@@ -75,6 +89,12 @@ object SessionJson {
             updatedAt = o.optLong("updatedAt"),
             thumbnail = if (o.has("thumbnail")) o.getString("thumbnail") else null,
             folder = o.optString("folder").takeIf { it.isNotBlank() },
+            voices = o.optJSONArray("voices")?.let { a ->
+                List(a.length()) { i ->
+                    val v = a.getJSONObject(i)
+                    Voice(v.getInt("id"), v.optString("name").takeIf { it.isNotBlank() })
+                }
+            }.orEmpty(),
             recordings = List(recs.length()) { i ->
                 val r = recs.getJSONObject(i)
                 Recording(
@@ -83,6 +103,9 @@ object SessionJson {
                     createdAt = r.optLong("createdAt"),
                     durationMs = r.optLong("durationMs"),
                     transcriptModel = if (r.has("transcriptModel")) r.getString("transcriptModel") else null,
+                    speakers = r.optJSONArray("speakers")?.let { a ->
+                        List(a.length()) { j -> a.getJSONArray(j).let { t -> SpeakerTurn(t.getLong(0), t.getLong(1), t.getInt(2)) } }
+                    },
                     transcript = r.optJSONArray("transcript")?.let { a ->
                         List(a.length()) { j ->
                             val t = a.getJSONObject(j)
@@ -128,4 +151,16 @@ object SessionJson {
     }
 
     private fun JSONArray?.strings(): List<String> = if (this == null) emptyList() else List(length()) { getString(it) }
+
+    /** A voiceprint as text: its floats' bytes, in Base64. */
+    fun encodeVoiceprint(v: FloatArray): String {
+        val bytes = ByteBuffer.allocate(v.size * 4).order(ByteOrder.LITTLE_ENDIAN)
+        v.forEach { bytes.putFloat(it) }
+        return Base64.getEncoder().encodeToString(bytes.array())
+    }
+
+    fun decodeVoiceprint(text: String): FloatArray? = runCatching {
+        val bytes = ByteBuffer.wrap(Base64.getDecoder().decode(text)).order(ByteOrder.LITTLE_ENDIAN)
+        FloatArray(bytes.remaining() / 4) { bytes.getFloat() }
+    }.getOrNull()
 }

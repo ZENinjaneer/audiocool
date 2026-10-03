@@ -1,5 +1,7 @@
 package com.kjwindham.audiocool.data
 
+import com.kjwindham.audiocool.speakers.Voices
+
 /** What a session's timeline shows. */
 enum class TimelineMode { EVERYTHING, CONTEXT, NOTES }
 
@@ -12,7 +14,7 @@ sealed interface TimelineRow {
         override val key get() = "rec:${rec.id}"
     }
 
-    /** A stretch of what was said: transcript phrases run together up to a pause, a photo, or about 25 s. */
+    /** A stretch of what was said: transcript phrases run together up to a pause, a photo, a new speaker, or about 25 s. */
     data class Speech(
         val recId: String,
         val startMs: Long,
@@ -24,6 +26,8 @@ sealed interface TimelineRow {
         val context: Boolean = false,
         /** Each word of [text], when what was said was timed word by word; else none. */
         val words: List<TimedWord> = emptyList(),
+        /** Who said it (the session's voice id), once sorted by voice. */
+        val voice: Int? = null,
     ) : TimelineRow {
         override val key get() = speechKey(recId, startMs)
     }
@@ -78,25 +82,34 @@ fun paragraphs(rec: Recording, breaks: List<Long>): List<TimelineRow.Speech> {
     var allTimed = true
     var start = 0L
     var end = 0L
+    var voice: Int? = null
     fun flush() {
         // Word by word only when every phrase in it was timed so, or the wrong word could light up.
-        if (text.isNotEmpty()) out += TimelineRow.Speech(rec.id, start, end, text.toString(), words = if (allTimed) timed.toList() else emptyList())
+        if (text.isNotEmpty()) out += TimelineRow.Speech(rec.id, start, end, text.toString(), words = if (allTimed) timed.toList() else emptyList(), voice = voice)
         text.clear()
         timed.clear()
         allTimed = true
     }
-    for (segment in rec.transcript.orEmpty()) {
+    // Phrases that more than one person spoke in, cut where the speaker changes.
+    for (segment in rec.transcript.orEmpty().flatMap { Voices.splitBySpeaker(it, rec.speakers) }) {
         val words = segment.text.trim()
         if (words.isEmpty()) continue
+        val speaker = Voices.voiceAt(rec.speakers, segment.startMs, segment.endMs)
         if (text.isNotEmpty() && (
                 segment.startMs - end >= PARAGRAPH_PAUSE_MS ||
                     segment.endMs - start > PARAGRAPH_MAX_MS ||
-                    breaks.any { it > start && it <= segment.startMs }
+                    breaks.any { it > start && it <= segment.startMs } ||
+                    (speaker != null && speaker != voice)
                 )
         ) {
             flush()
         }
-        if (text.isEmpty()) start = segment.startMs else text.append(' ')
+        if (text.isEmpty()) {
+            start = segment.startMs
+            voice = speaker
+        } else {
+            text.append(' ')
+        }
         val pieces = words.split(' ')
         val offsets = segment.words
         if (offsets != null && offsets.size == pieces.size) {

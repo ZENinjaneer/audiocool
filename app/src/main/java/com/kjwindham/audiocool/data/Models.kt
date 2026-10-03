@@ -15,7 +15,18 @@ data class Recording(
     val transcript: List<TranscriptSegment>? = null,
     /** Which speech model produced [transcript] (phone or desktop), if known. */
     val transcriptModel: String? = null,
+    /** Who spoke when; null until sorted by voice ("who said what"). */
+    val speakers: List<SpeakerTurn>? = null,
 )
+
+/** A stretch of a recording one voice spoke: [voice] is the session's [Voice.id]. */
+data class SpeakerTurn(val startMs: Long, val endMs: Long, val voice: Int)
+
+/**
+ * A voice heard in a session: [id] in its recordings' turns, and the name it was given. Its voiceprint
+ * is kept on the phone only (VoicePrints).
+ */
+data class Voice(val id: Int, val name: String? = null)
 
 /** A stretch of speech in a recording and the text recognized in it. */
 data class TranscriptSegment(
@@ -85,6 +96,8 @@ data class Session(
     val summary: SessionSummary? = null,
     /** The folder it's filed in, by name; null when it's in none. */
     val folder: String? = null,
+    /** The voices heard in it, once sorted by voice ("who said what"). */
+    val voices: List<Voice> = emptyList(),
 ) {
     val totalDurationMs: Long get() = recordings.sumOf { it.durationMs }
 

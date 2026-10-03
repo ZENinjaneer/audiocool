@@ -203,8 +203,11 @@ private fun TranscribeProgress(session: Session, state: TranscriptionController.
     val mine = state.current?.sessionId == session.id
     val percent = (state.progress * 100).toInt()
     val label = when {
+        !mine && state.queue.firstOrNull { it.sessionId == session.id }?.speakers == true -> "Waiting to find who said what…"
         !mine -> "Waiting to transcribe…"
         state.phase == TranscriptionController.Phase.DOWNLOADING_MODEL -> "Downloading the speech model… $percent%"
+        state.phase == TranscriptionController.Phase.DOWNLOADING_VOICE_MODEL -> "Downloading the voice model… $percent%"
+        state.phase == TranscriptionController.Phase.FINDING_SPEAKERS -> "Finding who said what… $percent%"
         session.recordings.size > 1 -> "Transcribing recording ${session.recordingNumber(state.current?.recId)}… $percent%"
         else -> "Transcribing… $percent%"
     }

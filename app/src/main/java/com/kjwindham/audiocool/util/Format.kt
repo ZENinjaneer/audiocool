@@ -2,6 +2,7 @@ package com.kjwindham.audiocool.util
 
 import com.kjwindham.audiocool.data.Note
 import com.kjwindham.audiocool.data.Session
+import com.kjwindham.audiocool.speakers.Voices
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -103,8 +104,13 @@ fun sessionMarkdown(session: Session, includeTranscript: Boolean = false): Strin
         appendLine("## Transcript")
         appendLine()
         for (rec in recs) {
-            for (segment in rec.transcript.orEmpty()) {
-                appendLine("- [${timeLabel(session, rec.id, segment.startMs)}] ${segment.text}")
+            // Who's speaking, where it changes (when the session was sorted by voice).
+            var lastVoice: Int? = null
+            for (segment in rec.transcript.orEmpty().flatMap { Voices.splitBySpeaker(it, rec.speakers) }) {
+                val voice = Voices.voiceAt(rec.speakers, segment.startMs, segment.endMs)
+                val who = if (voice != null && voice != lastVoice) "**${Voices.name(session, voice)}:** " else ""
+                if (voice != null) lastVoice = voice
+                appendLine("- [${timeLabel(session, rec.id, segment.startMs)}] $who${segment.text}")
             }
         }
     }

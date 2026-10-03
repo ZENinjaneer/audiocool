@@ -8,6 +8,8 @@ import com.kjwindham.audiocool.data.FolderRepository
 import com.kjwindham.audiocool.data.SessionRepository
 import com.kjwindham.audiocool.desktop.DesktopSync
 import com.kjwindham.audiocool.ocr.SlideText
+import com.kjwindham.audiocool.speakers.KnownVoices
+import com.kjwindham.audiocool.speakers.VoicePrints
 import com.kjwindham.audiocool.summarize.Organizer
 import com.kjwindham.audiocool.summarize.SummaryController
 import com.kjwindham.audiocool.transcribe.TranscriptionController
@@ -29,6 +31,8 @@ class AudioCoolApp : Application() {
         AppLog.init(this)
         SessionRepository.init(this)
         FolderRepository.init(this)
+        KnownVoices.init(this)
+        VoicePrints.init(this)
         RecorderController.init(this)
         QuickRecord.init(this)
         TranscriptionController.init(this)

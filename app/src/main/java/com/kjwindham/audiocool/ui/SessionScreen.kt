@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -131,6 +132,7 @@ import com.kjwindham.audiocool.desktop.DesktopSync
 import com.kjwindham.audiocool.search.HitKind
 import com.kjwindham.audiocool.search.SearchHit
 import com.kjwindham.audiocool.search.searchSession
+import com.kjwindham.audiocool.speakers.VoiceModel
 import com.kjwindham.audiocool.summarize.Organizer
 import com.kjwindham.audiocool.transcribe.LiveTranscription
 import com.kjwindham.audiocool.transcribe.SpeechModel
@@ -209,6 +211,8 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
     var editing by remember { mutableStateOf<Note?>(null) }
     // Recordings waiting on the user to OK the one-time model download.
     var awaitingDownload by remember { mutableStateOf<List<String>?>(null) }
+    var namingVoice by remember { mutableStateOf<Int?>(null) }
+    var confirmVoiceDownload by remember { mutableStateOf(false) }
     var confirmLiveDownload by remember { mutableStateOf(false) }
     // The photo note being looked at full screen.
     var viewing by remember { mutableStateOf<String?>(null) }
@@ -383,6 +387,14 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
     fun transcribe(ids: List<String>) {
         if (ids.isEmpty()) return
         if (transcription.modelReady) TranscriptionController.enqueue(session.id, ids) else awaitingDownload = ids
+    }
+
+    /** Finds who said what in every recording of the session (any not transcribed yet, once they are). */
+    fun findSpeakers() {
+        val ids = session.recordings.filter { it.durationMs > 0 }.map { it.id }
+        val untranscribed = session.recordings.filter { it.durationMs > 0 && it.transcript == null }.map { it.id }
+        if (untranscribed.isNotEmpty()) transcribe(untranscribed)
+        TranscriptionController.findSpeakers(session.id, ids)
     }
 
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { taken ->
@@ -573,6 +585,12 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
                                     },
                                 )
                             }
+                            if (!recordingHere && session.recordings.any { it.durationMs > 0 } && !transcription.isFindingSpeakers(session.id)) {
+                                DropdownMenuItem(text = { Text(if (session.voices.isEmpty()) "Who said what" else "Who said what again") }, onClick = {
+                                    showMenu = false
+                                    if (VoiceModel.isReady(context)) findSpeakers() else confirmVoiceDownload = true
+                                })
+                            }
                             if (recordingHere) {
                                 DropdownMenuItem(text = { Text("Hands-free slides") }, onClick = {
                                     showMenu = false
@@ -693,6 +711,7 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
                         listState = timelineList,
                         positionMs = position,
                         onPlayWord = { row, atMs -> playFrom(row.recId, atMs) },
+                        onVoice = { namingVoice = it },
                     )
                 }
                 val peekNote = peekId?.let { id -> session.notes.firstOrNull { it.id == id } }
@@ -759,6 +778,29 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
         }
     }
 
+    namingVoice?.let { id ->
+        NameVoiceDialog(session, id, onPlay = { recId, at -> playFrom(recId, at) }, onDismiss = { namingVoice = null })
+    }
+    if (confirmVoiceDownload) {
+        AlertDialog(
+            onDismissRequest = { confirmVoiceDownload = false },
+            title = { Text("Find who said what?") },
+            text = {
+                Text(
+                    "AudioCool tells the voices in this session apart and labels each paragraph with who's speaking; " +
+                        "tap a label to put a name to it. It needs a voice model (${VoiceModel.totalBytes / 1_000_000} MB), " +
+                        "downloaded once. Everything stays on this phone.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmVoiceDownload = false
+                    findSpeakers()
+                }) { Text("Download and start") }
+            },
+            dismissButton = { TextButton(onClick = { confirmVoiceDownload = false }) { Text("Cancel") } },
+        )
+    }
     awaitingDownload?.let { ids ->
         ModelDownloadDialog(
             onConfirm = {
@@ -861,15 +903,17 @@ fun SessionScreen(session: Session, onBack: () -> Unit, showSpeech: Boolean = fa
     }
 }
 
-/** "Oct 1, 2026 · 2:04 PM · 06:12 · 3 notes · 4 photos": the date only when the title isn't already it. */
+/** "Oct 1, 2026 · 2:04 PM · 06:12 · 3 notes · 4 photos · 3 speakers": the date only when the title isn't already it. */
 fun sessionSummary(session: Session): String {
     val notes = session.notes.count { it.photo == null }
     val photos = session.notes.count { it.photo != null }
+    val speakers = session.voices.size
     return listOfNotNull(
         formatDate(session.createdAt).takeIf { session.title != defaultSessionTitle(session.createdAt) },
         formatTime(session.totalDurationMs).takeIf { session.totalDurationMs > 0 },
         (if (notes == 1) "1 note" else "$notes notes").takeIf { notes > 0 },
         (if (photos == 1) "1 photo" else "$photos photos").takeIf { photos > 0 },
+        (if (speakers == 1) "1 speaker" else "$speakers speakers").takeIf { speakers > 0 },
     ).joinToString(" · ").ifEmpty { "Nothing recorded yet" }
 }
 

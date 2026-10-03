@@ -14,12 +14,18 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
-/** The transcription queue. [TranscriptionService] works through it in the background. */
+/**
+ * The transcription queue, which also finds who said what. [TranscriptionService] works through it in
+ * the background, one at a time (both keep the phone busy).
+ */
 object TranscriptionController {
-    enum class Phase { IDLE, DOWNLOADING_MODEL, TRANSCRIBING }
+    enum class Phase { IDLE, DOWNLOADING_MODEL, TRANSCRIBING, DOWNLOADING_VOICE_MODEL, FINDING_SPEAKERS }
 
-    /** Transcribe a recording, from [fromMs] on (earlier parts are already transcribed). */
-    data class Job(val sessionId: String, val recId: String, val fromMs: Long = 0)
+    /**
+     * Transcribe a recording, from [fromMs] on (earlier parts are already transcribed); or, with
+     * [speakers], find who spoke when in it.
+     */
+    data class Job(val sessionId: String, val recId: String, val fromMs: Long = 0, val speakers: Boolean = false)
 
     data class State(
         val queue: List<Job> = emptyList(),
@@ -30,10 +36,15 @@ object TranscriptionController {
         val modelReady: Boolean = false,
         val error: String? = null,
     ) {
+        /** Whether the recording is waiting to be transcribed, or being transcribed. */
         fun isPending(sessionId: String, recId: String) =
-            (current?.let { it.sessionId == sessionId && it.recId == recId } ?: false) ||
-                queue.any { it.sessionId == sessionId && it.recId == recId }
+            (current?.let { !it.speakers && it.sessionId == sessionId && it.recId == recId } ?: false) ||
+                queue.any { !it.speakers && it.sessionId == sessionId && it.recId == recId }
         fun isBusyWith(sessionId: String) = current?.sessionId == sessionId || queue.any { it.sessionId == sessionId }
+
+        /** Whether who said what is being worked out for the session, or waiting to be. */
+        fun isFindingSpeakers(sessionId: String) =
+            current?.let { it.speakers && it.sessionId == sessionId } == true || queue.any { it.speakers && it.sessionId == sessionId }
     }
 
     private val _state = MutableStateFlow(State())
@@ -96,9 +107,23 @@ object TranscriptionController {
         startWorker()
     }
 
-    /** A recording just stopped: transcribe it automatically once the model has been set up (or is on its way). */
+    /** Finds who said what in the session's [recIds] (after any transcribing queued for them). */
+    fun findSpeakers(sessionId: String, recIds: List<String>) {
+        _state.update { s ->
+            val pending = (listOfNotNull(s.current) + s.queue).filter { it.speakers && it.sessionId == sessionId }.map { it.recId }.toSet()
+            s.copy(queue = s.queue + recIds.filterNot { it in pending }.map { Job(sessionId, it, speakers = true) }, error = null)
+        }
+        save()
+        startWorker()
+    }
+
+    /**
+     * A recording just stopped: transcribe it automatically once the model has been set up (or is on
+     * its way), and in a session sorted by voice, find who spoke in it too.
+     */
     fun onRecordingFinished(sessionId: String, recId: String) {
         if (prefs.autoTranscribe && (_state.value.modelReady || wantModel)) enqueue(sessionId, listOf(recId))
+        if (SessionRepository.get(sessionId)?.voices?.isNotEmpty() == true) findSpeakers(sessionId, listOf(recId))
     }
 
     /**
@@ -111,9 +136,9 @@ object TranscriptionController {
         startWorker()
     }
 
-    /** Whether something is waiting for the speech model to be downloaded. */
+    /** Whether something is waiting for the speech model to be downloaded (finding who said what doesn't need it). */
     internal val needsModel: Boolean
-        get() = _state.value.let { !it.modelReady && (wantModel || it.queue.isNotEmpty() || it.current != null) }
+        get() = _state.value.let { !it.modelReady && (wantModel || it.queue.any { j -> !j.speakers } || it.current?.speakers == false) }
 
     /** Drops the session's queued recordings, and stops the one in progress if it's from this session. */
     fun cancel(sessionId: String) {
@@ -183,11 +208,11 @@ object TranscriptionController {
     private fun save() {
         val s = _state.value
         prefs.transcriptionQueue = (listOfNotNull(s.current) + s.queue)
-            .joinToString(",") { "${it.sessionId}:${it.recId}:${it.fromMs}" }
+            .joinToString(",") { "${it.sessionId}:${it.recId}:${it.fromMs}" + if (it.speakers) ":s" else "" }
     }
 
     private fun decode(saved: String): List<Job> = saved.split(",").mapNotNull { entry ->
         val parts = entry.split(":")
-        if (parts.size < 2) null else Job(parts[0], parts[1], parts.getOrNull(2)?.toLongOrNull() ?: 0L)
+        if (parts.size < 2) null else Job(parts[0], parts[1], parts.getOrNull(2)?.toLongOrNull() ?: 0L, parts.getOrNull(3) == "s")
     }
 }

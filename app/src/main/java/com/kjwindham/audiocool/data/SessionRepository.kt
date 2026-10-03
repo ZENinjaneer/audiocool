@@ -6,6 +6,11 @@ import android.util.AtomicFile
 import android.util.Log
 import androidx.annotation.VisibleForTesting
 import com.kjwindham.audiocool.audio.remuxAdtsToM4a
+import com.kjwindham.audiocool.speakers.VoicePrints
+import java.io.File
+import java.io.FileNotFoundException
+import java.util.concurrent.Executors
+import kotlin.math.abs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -15,10 +20,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import java.io.File
-import java.io.FileNotFoundException
-import java.util.concurrent.Executors
-import kotlin.math.abs
 
 /**
  * All sessions, held in memory and mirrored to files/sessions/<id>/session.json.
@@ -77,6 +78,7 @@ object SessionRepository {
     fun delete(id: String) {
         _sessions.update { list -> list.filterNot { it.id == id } }
         io.launch { sessionDir(id).deleteRecursively() }
+        VoicePrints.remove(id)
     }
 
     fun addRecording(sessionId: String, rec: Recording) =
@@ -146,6 +148,42 @@ object SessionRepository {
             )
         }
         return old
+    }
+
+    /**
+     * Saves who spoke when in a recording, and the session's voices (dropping any no recording has
+     * turns for any more).
+     */
+    fun setSpeakers(sessionId: String, recId: String, turns: List<SpeakerTurn>, voices: List<Voice>) = update(sessionId, touch = false) { s ->
+        val recordings = s.recordings.map { if (it.id == recId) it.copy(speakers = turns) else it }
+        val heard = recordings.flatMap { it.speakers.orEmpty() }.map { it.voice }.toSet()
+        s.copy(recordings = recordings, voices = voices.filter { it.id in heard })
+    }
+
+    /**
+     * Names a voice. The name of another voice in the session makes them one: the same person, found
+     * twice.
+     */
+    fun nameVoice(sessionId: String, voiceId: Int, name: String) = update(sessionId) { s ->
+        val other = s.voices.firstOrNull { it.id != voiceId && it.name.equals(name, ignoreCase = true) }
+        if (other == null) {
+            s.copy(voices = s.voices.map { if (it.id == voiceId) it.copy(name = name) else it })
+        } else {
+            s.copy(
+                recordings = s.recordings.map { r -> r.copy(speakers = r.speakers?.map { if (it.voice == voiceId) it.copy(voice = other.id) else it }?.let(::joinTurns)) },
+                voices = s.voices.filter { it.id != voiceId },
+            )
+        }
+    }
+
+    /** Turns in a row by the same voice, joined. */
+    private fun joinTurns(turns: List<SpeakerTurn>): List<SpeakerTurn> {
+        val out = ArrayList<SpeakerTurn>()
+        for (t in turns) {
+            val last = out.lastOrNull()
+            if (last != null && last.voice == t.voice) out[out.lastIndex] = last.copy(endMs = maxOf(last.endMs, t.endMs)) else out += t
+        }
+        return out
     }
 
     /** Saves the text found in a photo note's picture. */

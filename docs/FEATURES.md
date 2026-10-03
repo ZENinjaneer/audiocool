@@ -66,6 +66,21 @@ after the paragraph it was written during; photos as chapters; ★ marks.
   photo to use it instead). The grid button on the main screen switches between the list and a
   gallery of thumbnails with each session's name underneath; search results show them too.
 
+## Who said what
+
+- ⋮ › **Who said what** tells the voices in a session apart and labels the timeline with who's
+  speaking: a paragraph starts where the speaker changes, even partway through a sentence. The first
+  time, it downloads a voice model (28 MB); it runs in the background, on the phone.
+- Tap a label ("Speaker 2 · Who's this?") to name the voice. You see how much they said and a line of
+  it (tap to hear it), with names from earlier meetings to pick from. Giving two voices the same name
+  makes them one, for when one person was taken for two.
+- **Recognize this voice next time**: the voice's voiceprint is kept (on this phone only; not in
+  backups or on the desktop), and later recordings name it by themselves.
+- Once a session has speakers, its new recordings are sorted by voice too. ⋮ › **Who said what again**
+  redoes it, keeping the names.
+- It does best when people take turns and the phone is near the middle of the table. Many people
+  talking over each other in a big room is hard for it.
+
 ## Hands-free slides (beta)
 
 - While recording, ⋮ › **Hands-free slides** (or **Auto slides** on the lock-screen camera) has the

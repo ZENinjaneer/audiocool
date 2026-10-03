@@ -50,6 +50,8 @@
 - **Lock-screen controls.** Mark a moment, pause, stop or photograph a slide without unlocking.
 - **Spoken notes.** Hold the mic and say a note, through a headset if you like, while the phone
   keeps recording the room.
+- **Who said what.** For meetings: each paragraph says who's speaking. Name a voice once and it's
+  recognised in later recordings; the voiceprints stay on your phone.
 - **Backups and sharing.** Automatic backups to a folder you pick, and sharing as Markdown with the
   audio and photos.
 

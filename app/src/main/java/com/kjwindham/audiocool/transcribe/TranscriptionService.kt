@@ -15,13 +15,22 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
+import com.k2fsa.sherpa.onnx.OfflineSpeakerDiarization
 import com.k2fsa.sherpa.onnx.OnlineSpeechDenoiser
+import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractor
 import com.k2fsa.sherpa.onnx.Vad
 import com.kjwindham.audiocool.MainActivity
 import com.kjwindham.audiocool.R
 import com.kjwindham.audiocool.audio.RecorderController
 import com.kjwindham.audiocool.data.SessionRepository
+import com.kjwindham.audiocool.speakers.KnownVoices
+import com.kjwindham.audiocool.speakers.VoiceModel
+import com.kjwindham.audiocool.speakers.VoicePrints
+import com.kjwindham.audiocool.speakers.Voices
+import com.kjwindham.audiocool.speakers.WhoSaidWhat
 import com.kjwindham.audiocool.transcribe.TranscriptionController.Phase
+import java.util.concurrent.CancellationException
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -31,8 +40,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.concurrent.CancellationException
-import kotlin.coroutines.coroutineContext
 
 /**
  * Works through [TranscriptionController]'s queue in the foreground (so it keeps going with the app
@@ -99,8 +106,8 @@ class TranscriptionService : Service() {
                     if (!coroutineContext.isActive) throw e // the service is shutting down
                     null // the user stopped this one
                 } catch (e: Throwable) {
-                    Log.e(TAG, "Transcription failed", e)
-                    "Couldn't transcribe: ${e.message ?: e.javaClass.simpleName}"
+                    Log.e(TAG, if (job.speakers) "Finding who said what failed" else "Transcription failed", e)
+                    (if (job.speakers) "Couldn't find who said what: " else "Couldn't transcribe: ") + (e.message ?: e.javaClass.simpleName)
                 }
                 TranscriptionController.finished(error)
                 notifyProgress(force = true)
@@ -138,6 +145,7 @@ class TranscriptionService : Service() {
     }
 
     private fun process(job: TranscriptionController.Job) {
+        if (job.speakers) return findSpeakers(job)
         if (SessionRepository.get(job.sessionId)?.recording(job.recId) == null) return
         ensureModel()
 
@@ -177,6 +185,75 @@ class TranscriptionService : Service() {
         }
     }
 
+    /**
+     * Who said what in a recording: the audio a chunk at a time through [WhoSaidWhat], then its voices
+     * matched with those the session has (from its other recordings) and the ones you've named before.
+     */
+    private fun findSpeakers(job: TranscriptionController.Job) {
+        val rec = SessionRepository.get(job.sessionId)?.recording(job.recId) ?: return
+        if (!VoiceModel.isReady(this)) {
+            TranscriptionController.report(Phase.DOWNLOADING_VOICE_MODEL, 0f)
+            notifyProgress(force = true)
+            VoiceModel.download(this, cancelled) { done, total ->
+                TranscriptionController.report(Phase.DOWNLOADING_VOICE_MODEL, done.toFloat() / total)
+                notifyProgress()
+            }
+        }
+        TranscriptionController.report(Phase.FINDING_SPEAKERS, 0f)
+        notifyProgress(force = true)
+        val diarization = OfflineSpeakerDiarization(null, VoiceModel.diarizationConfig(this, THREADS))
+        val extractor = SpeakerEmbeddingExtractor(null, VoiceModel.embeddingConfig(this, THREADS))
+        try {
+            val who = WhoSaidWhat(diarization, extractor, VoiceModel.SAME_VOICE)
+            val chunkSize = (WhoSaidWhat.CHUNK_MS * WhoSaidWhat.SAMPLE_RATE / 1000).toInt()
+            var chunk = FloatArray(chunkSize)
+            var filled = 0
+            var chunkStartMs = 0L
+            fun flush() {
+                if (filled == 0) return
+                val samples = if (filled == chunk.size) chunk else chunk.copyOf(filled)
+                val chunkMs = filled * 1000L / WhoSaidWhat.SAMPLE_RATE
+                who.chunk(samples, chunkStartMs)
+                chunkStartMs += chunkMs
+                // How far through the recording the voices have been found (decoding is quick by comparison).
+                TranscriptionController.report(Phase.FINDING_SPEAKERS, (chunkStartMs.toFloat() / maxOf(1L, rec.durationMs)).coerceIn(0f, 1f))
+                notifyProgress()
+                filled = 0
+                chunk = FloatArray(chunkSize)
+            }
+            val latest = SessionRepository.get(job.sessionId)?.recording(job.recId) ?: return
+            AudioDecoder(SessionRepository.audioFile(job.sessionId, latest), WhoSaidWhat.SAMPLE_RATE).decode(
+                isCancelled = cancelled,
+                onProgress = {},
+                onChunk = { samples ->
+                    var at = 0
+                    while (at < samples.size) {
+                        val n = minOf(samples.size - at, chunk.size - filled)
+                        samples.copyInto(chunk, filled, at, at + n)
+                        filled += n
+                        at += n
+                        if (filled == chunk.size) flush()
+                    }
+                },
+            )
+            if (cancelled()) return
+            flush()
+            val (turns, prints) = who.result()
+            val session = SessionRepository.get(job.sessionId) ?: return
+            // A run again: this recording's old turns don't count when matching.
+            val others = session.copy(recordings = session.recordings.map { if (it.id == job.recId) it.copy(speakers = null) else it })
+            val kept = others.voices.filter { v -> others.recordings.any { r -> r.speakers.orEmpty().any { it.voice == v.id } } || v.name != null }
+            val matched = Voices.match(prints, kept, VoicePrints.of(job.sessionId), KnownVoices.voices.value, VoiceModel.SAME_VOICE, VoiceModel.KNOWN_VOICE)
+            SessionRepository.setSpeakers(job.sessionId, job.recId, turns.map { it.copy(voice = matched.ids[it.voice]) }, matched.voices)
+            val heard = SessionRepository.get(job.sessionId)?.voices.orEmpty().map { it.id }.toSet()
+            VoicePrints.set(job.sessionId, matched.prints.filterKeys { it in heard })
+            Log.i(TAG, "Found ${matched.ids.distinct().size} voices in ${job.recId}: ${turns.size} turns")
+        } finally {
+            diarization.release()
+            extractor.release()
+        }
+    }
+
     private fun recording() = RecorderController.state.value.status != RecorderController.Status.IDLE
 
     private fun acquireWakeLock() {
@@ -204,6 +281,8 @@ class TranscriptionService : Service() {
         val title = when (s.phase) {
             Phase.DOWNLOADING_MODEL -> "Downloading speech model · $percent%"
             Phase.TRANSCRIBING -> "Transcribing · $percent%"
+            Phase.DOWNLOADING_VOICE_MODEL -> "Downloading voice model · $percent%"
+            Phase.FINDING_SPEAKERS -> "Finding who said what · $percent%"
             Phase.IDLE -> "Transcribing"
         }
         val detail = listOfNotNull(session?.title, s.queue.size.takeIf { it > 0 }?.let { "$it more queued" })

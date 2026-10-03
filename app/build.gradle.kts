@@ -58,8 +58,8 @@ android {
         applicationId = "com.kjwindham.audiocool"
         minSdk = 26
         targetSdk = 35
-        versionCode = 19
-        versionName = "2.3"
+        versionCode = 20
+        versionName = "2.4"
         // The speech engine is native code; ship only the 64-bit ARM build every current phone uses.
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -130,6 +130,15 @@ tasks.withType<Test>().configureEach {
     }
     // Model comparison (ModelBenchmarkHostTest): -PasrBenchDir=<test set> -PasrBenchModels=type:dir,...
     providers.gradleProperty("asrBenchDir").orNull?.let { systemProperty("asr.bench.dir", it) }
+    // Speaker models for "who said what" (DiarizationBenchHostTest): -PdiarBenchDir, -PdiarModels, -PdiarThresholds, -PdiarSeg.
+    providers.gradleProperty("diarBenchDir").orNull?.let { systemProperty("diar.bench.dir", it) }
+    providers.gradleProperty("diarModels").orNull?.let { systemProperty("diar.models", it) }
+    providers.gradleProperty("diarThresholds").orNull?.let { systemProperty("diar.thresholds", it) }
+    providers.gradleProperty("diarSeg").orNull?.let { systemProperty("diar.seg", it) }
+    providers.gradleProperty("diarSame").orNull?.let { systemProperty("diar.same", it) }
+    providers.gradleProperty("diarSimilarities").orNull?.let { systemProperty("diar.similarities", it) }
+    providers.gradleProperty("diarRecognition").orNull?.let { systemProperty("diar.recognition", it) }
+    providers.gradleProperty("diarChunk").orNull?.let { systemProperty("diar.chunk", it) }
     providers.gradleProperty("asrBenchModels").orNull?.let { systemProperty("asr.bench.models", it) }
     providers.gradleProperty("asrBenchThreads").orNull?.let { systemProperty("asr.bench.threads", it) }
     providers.gradleProperty("asrBenchLeveling").orNull?.let { systemProperty("asr.bench.leveling", it) }

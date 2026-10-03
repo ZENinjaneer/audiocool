@@ -60,6 +60,30 @@ On 63 minutes of real meetings (AMI) recorded by a table mic, Parakeet made 28.3
 original audio and 29.9% to 39.7% on denoised versions of it; the speakers' headset mics gave
 10.5%. Distance matters far more than any filter: a mic near the speaker helps most.
 
+## Who said what: accuracy
+
+`DiarizationBenchHostTest` runs the real speaker models on the host (`-PsherpaHostDir`) over meetings
+with known speakers (`-PdiarBenchDir`: `eval/<meeting>.wav` plus `.json` turns, and the models). It
+was used on three ~7-minute AMI meetings (EN2002a-c, 3 or 4 people, fast back-and-forth), built from
+the test set's utterances laid end to end, once from the headset mics and once from the single
+distant mic (like a phone on the table).
+
+- Voiceprint models (how alike two stretches of the same person are, against two different people,
+  through the distant mic): 3D-Speaker ERes2Net told people apart best (median similarity 0.34 for the
+  same person, 0.15 for others); CAM++ didn't at all (0.44 and 0.43); WeSpeaker ResNet34 and NeMo
+  TitaNet small were in between.
+- sherpa-onnx's own clustering split each person into many (dozens at its default threshold), so the
+  app joins clusters that sound alike afterwards (`WhoSaidWhat`). With ERes2Net, clustering at 1.1 and
+  joining at 0.45: 22% diarization error and the right number of people on the headset meetings, 42%
+  and within one person on the distant mic.
+- Long recordings go a chunk at a time (10 minutes); in 3-minute chunks the error rose to 24% (headset)
+  and 49% (distant mic), so voices carry across chunks well enough.
+- A person's voice in one meeting against the same person in another: median similarity 0.85 (headset)
+  and 0.76 (distant mic), against 0.11 and 0.20 for other people; known voices need 0.6.
+- Phrases (the transcript's) clustered by voice did badly (49 to 78%): in a fast exchange one phrase
+  often holds several people. The app cuts phrases at speaker changes using the word timings instead.
+- sherpa-onnx 1.13.8's `processWithCallback` throws `NoSuchMethodError` from Kotlin; use `process`.
+
 ## Releases and signing
 
 - Each version is a GitHub release tagged `vX.Y.Z` whose APK is always named `AudioCool.apk`, so
