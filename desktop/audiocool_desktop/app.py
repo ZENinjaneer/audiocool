@@ -100,5 +100,11 @@ class App:
             audioDurationMs=result.duration_ms,
             device=result.device,
             timings=result.timings,
+            speechSeconds=result.speech_s,
+            chunks=result.chunks,
+            quality=result.quality,
         )
+        warnings = [w["message"] for w in result.quality.get("warnings", []) if w.get("message")]
+        if warnings:
+            info = " ".join(([info] if info else []) + warnings)
         return {"device": result.device, "info": info}

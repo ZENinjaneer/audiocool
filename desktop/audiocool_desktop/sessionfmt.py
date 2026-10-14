@@ -64,6 +64,13 @@ def _str(value: Any, what: str, default: str | None = None, max_len: int = 1_000
 
 
 def validate_transcript(value: Any, what: str = "transcript") -> list[dict]:
+    """Validate the shared segment schema, retaining extension fields without aliasing input.
+
+    ``w`` is the Android app's optional list of signed-Int millisecond offsets from ``s``.
+    Its entries correspond to ``t.trim().split(' ')`` in Timeline.kt, not absolute times
+    or a generic whitespace tokenizer. ``we`` optionally retains matching word-end offsets
+    for desktop consumers; older phones ignore it. Missing/null timing remains valid.
+    """
     if not isinstance(value, list):
         raise BadInput(f"{what} must be a list")
     out = []
@@ -73,8 +80,41 @@ def validate_transcript(value: Any, what: str = "transcript") -> list[dict]:
         s = _int(seg.get("s"), f"{what}[{i}].s")
         e = _int(seg.get("e"), f"{what}[{i}].e")
         t = _str(seg.get("t"), f"{what}[{i}].t", default="")
-        clean = dict(seg)
+        clean = copy.deepcopy(seg)
         clean.update(s=s, e=max(e, s), t=t)
+        words = seg.get("w")
+        if words is None:
+            clean.pop("w", None)
+        else:
+            word_path = f"{what}[{i}].w"
+            if not isinstance(words, list):
+                raise BadInput(f"{word_path} must be a list")
+            pieces = t.strip().split(" ") if t.strip() else []
+            if len(words) != len(pieces):
+                raise BadInput(f"{word_path} must have one offset per space-separated word")
+            previous = 0
+            for j, offset in enumerate(words):
+                if isinstance(offset, bool) or not isinstance(offset, int):
+                    raise BadInput(f"{word_path}[{j}] must be an integer")
+                if not 0 <= offset <= min(clean["e"] - s, 2_147_483_647):
+                    raise BadInput(f"{word_path}[{j}] must be within the segment and Android Int range")
+                if offset < previous:
+                    raise BadInput(f"{word_path} must be in nondecreasing order")
+                previous = offset
+        ends = seg.get("we")
+        if ends is None:
+            clean.pop("we", None)
+        else:
+            end_path = f"{what}[{i}].we"
+            if words is None or not isinstance(ends, list) or len(ends) != len(words):
+                raise BadInput(f"{end_path} must have one end offset per word in w")
+            for j, offset in enumerate(ends):
+                if isinstance(offset, bool) or not isinstance(offset, int):
+                    raise BadInput(f"{end_path}[{j}] must be an integer")
+                if not words[j] <= offset <= min(clean["e"] - s, 2_147_483_647):
+                    raise BadInput(f"{end_path}[{j}] must follow its word start and be within the segment and Android Int range")
+        if "timingEstimated" in clean and not isinstance(clean["timingEstimated"], bool):
+            raise BadInput(f"{what}[{i}].timingEstimated must be a boolean")
         out.append(clean)
     return out
 

@@ -463,16 +463,27 @@ class Library:
             entry = self.require(session_id)
             if entry.recording(rec_id) is None:
                 raise NotFound(f"no recording {rec_id} in session {session_id}")
-            sidecar = copy.deepcopy(entry.sidecar)
-            sidecar.setdefault("transcripts", {})[rec_id] = {
+            if not isinstance(model, str) or not model.strip():
+                raise BadInput("transcript model must be a nonempty string")
+            if not isinstance(model_name, str):
+                raise BadInput("transcript model name must be a string")
+            transcript = {
+                **copy.deepcopy(meta),
                 "model": model,
                 "modelName": model_name,
                 "origin": "desktop",
                 "createdAt": fmt.now_ms(),
                 "edited": False,
-                **meta,
-                "segments": [{"s": int(s["s"]), "e": int(s["e"]), "t": str(s["t"])} for s in segments],
+                "segments": fmt.validate_transcript(segments),
             }
+            # Engines may supply extra model/provenance metadata. Check it before any disk
+            # write, and keep reserved ownership fields authoritative over extra metadata.
+            try:
+                json.dumps(transcript, allow_nan=False)
+            except (TypeError, ValueError) as exc:
+                raise BadInput("transcript metadata must contain finite JSON values") from exc
+            sidecar = copy.deepcopy(entry.sidecar)
+            sidecar.setdefault("transcripts", {})[rec_id] = transcript
             self._write(entry.folder, self._base(entry), sidecar)
 
     def edit_transcript_line(self, session_id: str, rec_id: str, index: int, text: str, start_ms: int | None = None) -> dict:
@@ -498,7 +509,13 @@ class Library:
                 raise BadInput("no such transcript line")
             if start_ms is not None and segs[index]["s"] != start_ms:
                 raise BadInput("the transcript changed; reload and try again")
-            segs[index]["t"] = text.strip()
+            corrected = text.strip()
+            if corrected != segs[index]["t"]:
+                # A text edit is not a new alignment, even when its word count is unchanged.
+                segs[index].pop("w", None)
+                segs[index].pop("we", None)
+                segs[index].pop("timingEstimated", None)
+            segs[index]["t"] = corrected
             record["edited"] = True
             record["editedAt"] = fmt.now_ms()
             self._write(entry.folder, self._base(entry), sidecar)

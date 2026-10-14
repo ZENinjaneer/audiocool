@@ -37,7 +37,7 @@ def default_specs(language: str | None = "English") -> list[ModelSpec]:
         ModelSpec(
             id="qwen3-asr-1.7b",
             name="Qwen3-ASR 1.7B",
-            description="Most accurate. Qwen3-ASR 1.7B with the Qwen3 forced aligner for word timing.",
+            description="Qwen3-ASR 1.7B with the Qwen3 forced aligner for word timing. Compare models on difficult audio.",
             device="cuda",
             factory=lambda dev: Qwen3Engine("qwen3-asr-1.7b", "Qwen3-ASR 1.7B", dev, language=language),
             repos=("Qwen/Qwen3-ASR-1.7B-hf", "Qwen/Qwen3-ForcedAligner-0.6B-hf"),
@@ -45,7 +45,7 @@ def default_specs(language: str | None = "English") -> list[ModelSpec]:
         ModelSpec(
             id="parakeet-tdt-0.6b-v3",
             name="Parakeet TDT 0.6B v3",
-            description="Fast. NVIDIA Parakeet TDT 0.6B v3, nearly as accurate at several times the speed.",
+            description="Fast transcription with NVIDIA Parakeet TDT 0.6B v3 and native word timing.",
             device="cuda",
             factory=lambda dev: ParakeetEngine("parakeet-tdt-0.6b-v3", "Parakeet TDT 0.6B v3", dev, repo=parakeet),
             repos=(parakeet,),

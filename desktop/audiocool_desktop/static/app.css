@@ -395,6 +395,13 @@ h2 svg { width: 19px; height: 19px; fill: none; stroke: var(--accent); stroke-wi
 .line.edited .line-text::after { content: "edited"; font-size: 11px; color: var(--muted); margin-left: 8px; }
 mark { background: var(--mark); color: var(--mark-text); border-radius: 3px; padding: 0 1px; }
 .transcript-empty { padding: 34px 20px; text-align: center; color: var(--muted); }
+.transcript-quality { margin: 12px; padding: 14px 16px; border-radius: var(--radius-sm); background: var(--warn-soft); color: var(--text); font-size: 13px; }
+.transcript-quality > strong { color: var(--warn); }
+.transcript-quality p { margin: 6px 0; }
+.transcript-quality summary { margin-top: 10px; cursor: pointer; }
+.transcript-quality ul { padding-left: 20px; max-height: 240px; overflow-y: auto; }
+.transcript-quality li { margin: 6px 0; }
+.quality-jump { color: var(--accent-text); background: transparent; border: 0; padding: 2px; text-decoration: underline; cursor: pointer; font: inherit; }
 .transcript-empty svg { width: 40px; height: 40px; stroke: var(--muted); fill: none; stroke-width: 1.6; margin-bottom: 6px; }
 .toggle { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; color: var(--text-2); font-size: 13px; user-select: none; }
 .toggle input { accent-color: var(--accent); width: 15px; height: 15px; }

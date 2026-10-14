@@ -688,6 +688,25 @@
     }
 
     // -- transcript --------------------------------------------------------------------
+    function qualityNotice(quality) {
+      if (!quality || !Array.isArray(quality.warnings) || !quality.warnings.length) return '';
+      const warnings = quality.warnings.filter((w) => w && typeof w.message === 'string');
+      if (!warnings.length) return '';
+      const validInterval = (g) => g && Number.isFinite(g.s) && Number.isFinite(g.e) && g.s >= 0 && g.e >= g.s;
+      const gaps = (Array.isArray(quality.gaps) ? quality.gaps : []).filter((g) => validInterval(g) && g.audible);
+      const alignment = quality.alignment || {};
+      const estimates = (Array.isArray(alignment.estimatedTiming) ? alignment.estimatedTiming : []).filter(validInterval);
+      return html`<aside class="transcript-quality" aria-label="Transcript review">
+        <strong>Review this transcript</strong>
+        ${warnings.map((w) => html`<p>${w.message}</p>`)}
+        ${gaps.length || estimates.length ? html`<details><summary>Listen to flagged intervals</summary>
+          <ul>${gaps.map((g) => html`<li><button class="quality-jump" data-review-ms="${g.s}">${fmtTime(g.s)}–${fmtTime(g.e)}</button> Untranscribed audio</li>`)}
+          ${estimates.map((g) => html`<li><button class="quality-jump" data-review-ms="${g.s}">${fmtTime(g.s)}–${fmtTime(g.e)}</button> Estimated word timing</li>`)}</ul>
+          ${quality.coverage?.gapsTruncated || alignment.truncated ? html`<p>Only a limited set of intervals is shown. Review the rest of the recording too.</p>` : ''}
+        </details>` : ''}
+      </aside>`;
+    }
+
     function renderTranscript() {
       const box = $('#transcript', el);
       const label = $('#model-label', el);
@@ -702,21 +721,29 @@
       } else {
         label.innerHTML = '';
       }
-      if (!lines.length) {
-        box.innerHTML = out(html`<div class="transcript-empty"><svg viewBox="0 0 24 24">${raw(ICONS.speech.replace(/<\/?svg[^>]*>/g, ''))}</svg>
-          <div>${info.transcriptSource ? 'The transcript is empty (no speech found).' : info.hasAudio ? 'Not transcribed yet. Pick a model above and press Transcribe.' : 'Waiting for the audio from the phone.'}</div></div>`);
-        return;
-      }
-      box.innerHTML = out(lines.map((seg, i) => html`<div class="line" data-i="${i}">
-        <span class="chip">${fmtTime(seg.s)}</span>
-        <span class="line-text">${seg.t}</span><button class="icon-btn edit-btn" title="Edit this line" aria-label="Edit line">${icon('edit')}</button></div>`));
+      const notice = qualityNotice(info.quality);
       box.onclick = (e) => {
+        if (editing) return;
+        const jump = e.target.closest('.quality-jump');
+        if (jump) {
+          const ms = Number(jump.dataset.reviewMs);
+          if (Number.isFinite(ms)) seekTo(Math.max(0, ms), true);
+          return;
+        }
         const line = e.target.closest('.line');
-        if (!line || editing) return;
+        if (!line) return;
         const i = Number(line.dataset.i);
         if (e.target.closest('.edit-btn')) { startEdit(line, i); return; }
         seekTo(Math.max(0, segs()[i].s - LINE_LEAD_MS), true);
       };
+      if (!lines.length) {
+        box.innerHTML = out(html`${notice}<div class="transcript-empty"><svg viewBox="0 0 24 24">${raw(ICONS.speech.replace(/<\/?svg[^>]*>/g, ''))}</svg>
+          <div>${info.transcriptSource ? 'No words were recognized. Listen to the recording to check for missed speech.' : info.hasAudio ? 'Not transcribed yet. Pick a model above and press Transcribe.' : 'Waiting for the audio from the phone.'}</div></div>`);
+        return;
+      }
+      box.innerHTML = out([notice, lines.map((seg, i) => html`<div class="line" data-i="${i}">
+        <span class="chip">${fmtTime(seg.s)}</span>
+        <span class="line-text">${seg.t}</span><button class="icon-btn edit-btn" title="Edit this line" aria-label="Edit line">${icon('edit')}</button></div>`)]);
       box.ondblclick = (e) => {
         const line = e.target.closest('.line');
         if (line && e.target.closest('.line-text') && !editing) startEdit(line, Number(line.dataset.i));

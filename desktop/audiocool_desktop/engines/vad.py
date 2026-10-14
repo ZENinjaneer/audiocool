@@ -1,15 +1,15 @@
-"""Speech detection with Silero VAD, used to cut long recordings into chunks at pauses.
+"""Speech detection with Silero VAD, preserving recurrent state across the recording.
 
-Silero scores 32 ms windows one after another, carrying state between them. Scoring an hour of
-audio that way is ~110k model calls, so the audio is split into a few dozen contiguous streams
-that are scored side by side as one batch (each stream keeps its own state; only its first few
-windows lack context). The scores then go through Silero's own post-processing.
+Independent parallel streams are not equivalent to a chronological pass: a short audio warmup
+does not reconstruct the LSTM's hidden/cell state. The resulting probability changes can discard
+clear speech far beyond the split boundary. Process frames in order and reset only between files.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
+from importlib.metadata import PackageNotFoundError, version
 
 import numpy as np
 
@@ -17,8 +17,24 @@ log = logging.getLogger(__name__)
 
 SR = 16_000
 WINDOW = 512  # samples per Silero window at 16 kHz
+DEFAULT_THRESHOLD = 0.4
+MIN_SILENCE_MS = 300
+MIN_SPEECH_MS = 250
+PAD_MS = 150
 _model = None
 _lock = threading.Lock()
+
+
+def settings(threshold: float, max_speech_s: float) -> dict:
+    """Record the detector and actual settings with the resulting transcript."""
+    try:
+        package_version = version("silero-vad")
+    except PackageNotFoundError:
+        package_version = "unknown"
+    return {"name": "silero-vad", "packageVersion": package_version, "backend": "torchscript",
+        "state": "chronological", "sampleRate": SR, "windowSamples": WINDOW,
+        "threshold": threshold, "maxSpeechSeconds": max_speech_s,
+        "minSilenceMs": MIN_SILENCE_MS, "minSpeechMs": MIN_SPEECH_MS, "padMs": PAD_MS}
 
 
 def _silero():
@@ -43,50 +59,50 @@ def _load():
         return _model
 
 
-WARMUP = 48  # windows (~1.5 s) each stream runs over the previous stream's audio first
-
-
 def speech_probs(audio: np.ndarray, streams: int | None = None) -> np.ndarray:
-    """Speech probability of each 512-sample window of 16 kHz audio."""
+    """Speech probability for each 512-sample window of 16 kHz audio.
+
+    ``streams`` is retained for callers of the old API, but no longer partitions recurrent
+    history. All values produce the same chronological inference. Working memory, other than
+    the returned probabilities, is bounded to one frame; even the last partial frame is scored.
+    """
     import torch
 
-    model = _load()
+    audio = np.asarray(audio, dtype=np.float32)
+    if audio.ndim != 1:
+        raise ValueError("VAD audio must be one-dimensional mono samples")
     n = len(audio)
     frames = -(-n // WINDOW)
     if frames == 0:
         return np.zeros(0, np.float32)
-    if streams is None:
-        # At least ~20 s per stream, at most 64 streams.
-        streams = int(max(1, min(64, frames // 625)))
-    per = -(-frames // streams)
-    warm = WARMUP if streams > 1 else 0
-    # Stream k scores windows [k*per, (k+1)*per) after warming its state up on the `warm`
-    # windows before them, so its first real windows have context like a sequential pass.
-    padded = np.zeros((warm + streams * per) * WINDOW, np.float32)
-    padded[warm * WINDOW: warm * WINDOW + n] = audio
-    span = (per + warm) * WINDOW
-    x = torch.from_numpy(np.stack([padded[k * per * WINDOW: k * per * WINDOW + span] for k in range(streams)]))
-    out = torch.empty(streams, per + warm)
-    threads = torch.get_num_threads()
+    model = _load()
+    out = np.empty(frames, dtype=np.float32)
     with _lock, torch.inference_mode():
-        torch.set_num_threads(min(threads, 4))  # tiny ops: more threads only add overhead and contention
+        threads = torch.get_num_threads()
+        torch.set_num_threads(min(threads, 4))
         try:
-            model.reset_states()  # the model sizes its state to the batch on the first call
-            for i in range(per + warm):
-                out[:, i] = model(x[:, i * WINDOW:(i + 1) * WINDOW], SR).reshape(-1)
             model.reset_states()
+            for i in range(frames):
+                chunk = audio[i * WINDOW:(i + 1) * WINDOW]
+                if len(chunk) < WINDOW:
+                    chunk = np.pad(chunk, (0, WINDOW - len(chunk)))
+                frame = torch.from_numpy(np.ascontiguousarray(chunk)).unsqueeze(0)
+                out[i] = float(model(frame, SR).reshape(-1)[0])
         finally:
-            torch.set_num_threads(threads)
-    return out[:, warm:].reshape(-1)[:frames].numpy()
+            try:
+                model.reset_states()  # also clear state after an interrupted or failed pass
+            finally:
+                torch.set_num_threads(threads)
+    return out
 
 
 def speech_segments(
     audio: np.ndarray,
-    threshold: float = 0.4,
+    threshold: float = DEFAULT_THRESHOLD,
     max_speech_s: float = 30.0,
-    min_silence_ms: int = 300,
-    min_speech_ms: int = 250,
-    pad_ms: int = 150,
+    min_silence_ms: int = MIN_SILENCE_MS,
+    min_speech_ms: int = MIN_SPEECH_MS,
+    pad_ms: int = PAD_MS,
 ) -> list[tuple[int, int]]:
     """Stretches of speech as (start, end) sample positions in 16 kHz audio."""
     get_speech_timestamps_from_probs = _silero().utils_vad.get_speech_timestamps_from_probs

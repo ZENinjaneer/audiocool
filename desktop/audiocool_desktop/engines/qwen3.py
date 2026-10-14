@@ -1,7 +1,6 @@
 """Qwen3-ASR 1.7B with the Qwen3 forced aligner, through Hugging Face Transformers.
 
-Qwen3-ASR is the most accurate open-weights English model on the Open ASR Leaderboard (as of
-Sept 2026). It outputs punctuated, cased text but no timestamps, so a second, non-autoregressive
+It outputs punctuated, cased text but no timestamps, so a second, non-autoregressive
 model (Qwen3-ForcedAligner-0.6B) places each word in the audio (80 ms resolution).
 """
 
@@ -9,6 +8,7 @@ from __future__ import annotations
 
 import gc
 import logging
+import math
 import unicodedata
 
 import numpy as np
@@ -28,6 +28,39 @@ def _has_cjk(text: str) -> bool:
     return any(unicodedata.east_asian_width(c) in ("W", "F") and unicodedata.category(c).startswith("L") for c in text)
 
 
+def alignment_problem(text: str, aligned: list[dict], chunk_s: float) -> str | None:
+    """Explain a fallback instead of presenting estimated positions as measured word times."""
+    content = [t for t in text.split() if any(_kept(c) for c in t)]
+    if not content:
+        return None
+    if _has_cjk(text):
+        return "unsupported_tokenization"
+    if not aligned:
+        return "alignment_missing"
+    if len(content) != len(aligned):
+        return "token_count_mismatch"
+    previous = -1.0
+    for token, item in zip(content, aligned):
+        if not isinstance(item, dict):
+            return "invalid_alignment_time"
+        if "text" in item:
+            normalized = "".join(c for c in token if _kept(c)).casefold()
+            aligned_text = "".join(c for c in str(item["text"]) if _kept(c)).casefold()
+            if normalized != aligned_text:
+                return "token_text_mismatch"
+        try:
+            start, end = float(item["start_time"]), float(item["end_time"])
+        except (KeyError, TypeError, ValueError):
+            return "invalid_alignment_time"
+        if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end < start:
+            return "invalid_alignment_time"
+        # One 80ms alignment frame of tolerance for rounded audio boundaries.
+        if start < previous or end > chunk_s + 0.081:
+            return "out_of_order_or_out_of_bounds"
+        previous = start
+    return None
+
+
 def attach_times(text: str, aligned: list[dict], offset_s: float, chunk_s: float) -> list[Word]:
     """Puts the aligner's times on the original (punctuated) words.
 
@@ -37,10 +70,9 @@ def attach_times(text: str, aligned: list[dict], offset_s: float, chunk_s: float
     text), times are spread over the chunk by word length instead.
     """
     tokens = text.split()
-    content = [t for t in tokens if any(_kept(c) for c in t)]
     if not tokens:
         return []
-    if len(content) != len(aligned) or _has_cjk(text):
+    if alignment_problem(text, aligned, chunk_s) is not None:
         return spread_words(tokens, offset_s, chunk_s)
     words: list[Word] = []
     prefix = ""
@@ -54,7 +86,7 @@ def attach_times(text: str, aligned: list[dict], offset_s: float, chunk_s: float
             continue
         a = aligned[ai]
         ai += 1
-        start, end = float(a["start_time"]), float(a["end_time"])
+        start, end = min(float(a["start_time"]), chunk_s), min(float(a["end_time"]), chunk_s)
         words.append(Word(prefix + tok, offset_s + start, offset_s + max(end, start)))
         prefix = ""
     return words
@@ -173,7 +205,10 @@ class Qwen3Engine(Engine):
 
         def align(sub: list[int]) -> list[list[dict]]:
             try:
-                return self._align_batch([chunks[i] for i in sub], [texts[i] for i in sub])
+                aligned = self._align_batch([chunks[i] for i in sub], [texts[i] for i in sub])
+                if len(aligned) != len(sub):
+                    raise ValueError("aligner returned a different number of chunks")
+                return aligned
             except Exception as e:  # keep the text even if alignment fails
                 if is_oom(e):
                     raise
@@ -185,6 +220,9 @@ class Qwen3Engine(Engine):
                 raise Cancelled()
             idx = [todo[k] for k in batch]
             for i, st in zip(idx, splitter.run(idx, align)):
+                issue = alignment_problem(texts[i], st, lengths[i] / SR)
+                if issue:
+                    self.record_alignment_fallback(offsets_s[i], lengths[i] / SR, issue)
                 results[i] = attach_times(texts[i], st, offsets_s[i], lengths[i] / SR)
             done += sum(lengths[i] for i in idx)
             progress(0.85 + 0.15 * done / max(sum(lengths[i] for i in todo), 1))

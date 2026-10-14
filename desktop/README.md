@@ -9,7 +9,7 @@ back. In the browser you can browse, play, search and export everything.
 
 - **Library** in the phone's backup layout (one folder per session), so a phone backup folder can
   be imported or used directly as the library.
-- **Transcription** with Qwen3-ASR 1.7B (most accurate open model on the Open ASR Leaderboard),
+- **Transcription** with Qwen3-ASR 1.7B and forced word alignment,
   NVIDIA Parakeet TDT 0.6B v3 (fast) or Parakeet on the CPU; sentence-level lines with accurate
   start and end times.
 - **Summaries for the phone** (optional; Settings › Summaries for the phone): Google's Gemma 4
@@ -133,17 +133,16 @@ are kept. Or set the library folder (Settings) to the backup folder itself.
 
 ## Models
 
-Chosen from the [Open ASR Leaderboard](https://huggingface.co/spaces/hf-audio/open_asr_leaderboard)
-as of 25 Sept 2026. The best open-weights English models there are Qwen3-ASR 1.7B (4.31 % mean
-WER), Hojo-ASR (4.33 %), Higgs Audio v3 STT (4.39 %) and Canary-Qwen 2.5B (4.43 %); Parakeet TDT
-0.6B v2/v3 sit at 4.7–4.9 % with about 7x Qwen3-ASR's throughput there (RTFx ~6000 vs 820);
-Whisper large-v3 is at 5.78 %. Among the long-form results, the best open model (Cohere
-Transcribe) needs a Hugging Face login to download, so it isn't offered.
+The [Open ASR Leaderboard](https://huggingface.co/spaces/hf-audio/open_asr_leaderboard)
+is useful context, but its datasets and scores change. Benchmark rankings do not establish the
+best model for a particular recording: distant microphones, muffled speech and technical names
+need direct comparison and listening. Qwen3-ASR is the default; Parakeet offers faster recognition
+with native word timing. A completed job does not guarantee complete or accurate recognition.
 
 | Id | Model | Use | Runs on |
 |---|---|---|---|
-| `qwen3-asr-1.7b` (default) | [Qwen3-ASR 1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B-hf) + [Qwen3-ForcedAligner 0.6B](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B-hf) | Most accurate | GPU (bf16), else CPU |
-| `parakeet-tdt-0.6b-v3` | [NVIDIA Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) | Fast, nearly as accurate | GPU (bf16), else CPU |
+| `qwen3-asr-1.7b` (default) | [Qwen3-ASR 1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B-hf) + [Qwen3-ForcedAligner 0.6B](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B-hf) | Punctuated text and forced word alignment | GPU (bf16), else CPU |
+| `parakeet-tdt-0.6b-v3` | [NVIDIA Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) | Fast recognition and native word timing | GPU (bf16), else CPU |
 | `parakeet-tdt-0.6b-v3-cpu` | the same Parakeet | Keeps the GPU free; the default when there's no GPU | CPU (fp32) |
 
 All three run through Hugging Face Transformers 5.18 (no NeMo, no system ffmpeg). Qwen3-ASR
@@ -151,13 +150,25 @@ writes punctuated, cased text but no times, so the Qwen3 forced aligner places e
 resolution); Parakeet's transducer gives token times itself.
 
 **Pipeline.** PyAV (bundled FFmpeg) decodes the AAC (ADTS or MP4) to 16 kHz mono → Silero VAD
-finds speech (an hour is scored in 1–2 s by running 64 stretches of the recording side by side)
+finds speech in chronological order, preserving its recurrent state across the whole recording
 → speech is cut at pauses into chunks of up to 30 s → batches of chunks go through the model →
 word times → hesitation sounds ("uh", "um") are dropped → words are grouped into lines: sentences,
 split at the best pause or comma when longer than about 12–20 s, and short ones merged with a
 neighbour (lines are at most 20 s and at least 2 s unless a short phrase stands alone between long
 pauses; the median is 4–6 s on talks). Start and end times come from the first and last word, so
 clicking a line starts right where it was said.
+
+**Review and timing.** New desktop transcripts store coverage diagnostics and alignment fallback
+intervals in `audiocool-desktop.json`. The web UI flags long untranscribed intervals with audible
+signal and lets you jump to them. Signal can be background noise; a warning is a request to
+listen, not proof that speech was missed. Short omissions and recognition errors can still pass
+these checks. If forced alignment fails, approximate word timing is explicitly flagged.
+Word offsets (`w`, milliseconds relative to the line start) survive saving, syncing and backup
+export/import. Editing a line removes its old word offsets because they no longer match its text.
+Word ends (`we`) preserve pauses between words. The engine uses a sensitive VAD threshold of 0.1
+and stores the actual detector version/settings with each result. This improves recall on the
+tested distant-microphone speech, but severely muffled speech can still be skipped. Review warnings
+cover audible gaps of at least 15 seconds; they are not a check of every recognized word.
 
 **GPU and fallback.** Only one model is loaded at a time, and it's unloaded after 10 idle minutes;
 cached GPU memory is handed back after every job. If the GPU runs out of memory (say another
@@ -166,6 +177,9 @@ still fails (or the driver errors), the job is retried on the CPU and the job li
 Without CUDA, the CPU Parakeet is the default.
 
 ### Measured speed and accuracy
+
+The measurements below are historical, from before the October 2026 detector-state fix and
+coverage checks. They are not performance or accuracy measurements of the current pipeline.
 
 RTX 5090 Laptop GPU (24 GB), Core Ultra 9 275HX, PyTorch 2.8 (CUDA 12.8). Three TED talks from the
 TED-LIUM long-form test set (59.8 min in total), re-encoded the way the phone records (AAC in

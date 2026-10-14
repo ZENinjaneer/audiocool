@@ -160,9 +160,10 @@ def build_segments(
     soft_max_s: float = 12.0,
     pause_s: float = 1.5,
 ) -> list[dict]:
-    """Groups words into transcript lines ``{"s": ms, "e": ms, "t": text, "w": [ms, ...]}``, where ``w``
+    """Groups words into transcript lines ``{"s": ms, "e": ms, "t": text, "w": [ms, ...], "we": [...]}``, where ``w``
     is where each of the line's words (``t`` split at its spaces) starts, from ``s``: the phone lights
-    up each word as it's played. It's left out when the words and the text don't line up one to one."""
+    up each word as it's played. ``we`` stores matching word ends, preserving pauses for exports.
+    Both are left out when the words and the text don't line up one to one."""
     words = [w for w in words if w.text.strip()]
     if not words:
         return []
@@ -198,6 +199,8 @@ def build_segments(
             shown = [w for w in p if w.text.strip()]
             if len(shown) == len(text.split(" ")):
                 seg["w"] = [min(max(int(round(w.start * 1000)) - s, 0), e - s) for w in shown]
+                seg["we"] = [min(max(int(round(w.end * 1000)) - s, start), e - s)
+                             for w, start in zip(shown, seg["w"])]
             out.append(seg)
             last_end = e
     return out

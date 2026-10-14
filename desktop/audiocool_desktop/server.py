@@ -165,6 +165,7 @@ def recording_info(app: App, entry: Entry, rec: dict) -> dict:
         "edited": bool(owned and owned.get("edited")),
         "transcribedAt": owned.get("createdAt") if owned else None,
         "device": owned.get("device") if owned else None,
+        "quality": owned.get("quality") if owned else None,
         "segments": len(rec.get("transcript") or []),
     }
 

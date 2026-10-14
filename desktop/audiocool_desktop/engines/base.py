@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import math
+import heapq
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,6 +35,82 @@ class Result:
     timings: dict = field(default_factory=dict)  # seconds spent per stage
     speech_s: float = 0.0
     chunks: int = 0
+    quality: dict = field(default_factory=dict)
+
+
+QUALITY_INTERVAL_LIMIT = 100
+GAP_THRESHOLD_MS = 15_000
+
+
+def _merged_intervals(intervals: list[tuple[int, int]], duration_ms: int) -> list[tuple[int, int]]:
+    out: list[tuple[int, int]] = []
+    for start, end in sorted(intervals):
+        start, end = max(0, min(start, duration_ms)), max(0, min(end, duration_ms))
+        if end < start:
+            continue
+        if out and start <= out[-1][1]:
+            out[-1] = (out[-1][0], max(end, out[-1][1]))
+        else:
+            out.append((start, end))
+    return out
+
+
+def _signal_levels(samples: np.ndarray) -> tuple[float, float]:
+    """RMS/peak dBFS with bounded scratch memory, including for hour-long gaps."""
+    energy, peak = 0.0, 0.0
+    for start in range(0, len(samples), SR * 2):
+        block = samples[start:start + SR * 2].astype(np.float64)
+        energy += float(np.dot(block, block))
+        if len(block):
+            peak = max(peak, float(np.max(np.abs(block))))
+    rms = math.sqrt(energy / max(len(samples), 1))
+    return round(20 * math.log10(max(rms, 1e-8)), 2), round(20 * math.log10(max(peak, 1e-8)), 2)
+
+
+def coverage_quality(samples: np.ndarray, speech: list[tuple[int, int]], chunks: list[tuple[int, int]],
+                     words: list[Word], gap_threshold_ms: int = GAP_THRESHOLD_MS) -> dict:
+    """Report untranscribed intervals; signal energy is not proof that they contain speech.
+
+    Only diagnostics are produced. Never force recognition of a rejected interval here: speech
+    recognizers can invent text over noise or silence. Keep the largest 100 intervals and retain
+    total counts so long recordings cannot create unbounded metadata.
+    """
+    duration = len(samples) * 1000 // SR
+    spoken = _merged_intervals([(round(w.start * 1000), round(w.end * 1000)) for w in words
+                               if math.isfinite(w.start) and math.isfinite(w.end)], duration)
+    admitted = _merged_intervals([(a * 1000 // SR, b * 1000 // SR) for a, b in speech], duration)
+    heap: list[tuple[int, int, dict]] = []
+    previous, total, audible_count, longest = 0, 0, 0, 0
+    for start, end in spoken + [(duration, duration)]:
+        gap = start - previous
+        longest = max(longest, gap)
+        if gap >= gap_threshold_ms:
+            rms, peak = _signal_levels(samples[previous * SR // 1000:start * SR // 1000])
+            audible = rms >= -60.0 and peak >= -45.0
+            overlap = sum(max(0, min(start, b) - max(previous, a)) for a, b in admitted)
+            kind = "speech_without_text" if overlap >= min(1000, gap // 10) else "vad_skipped"
+            record = {"s": previous, "e": start, "kind": kind, "rmsDbfs": rms,
+                      "peakDbfs": peak, "audible": audible, "vadSpeechMs": overlap}
+            total += 1
+            audible_count += int(audible)
+            candidate = (gap, previous, record)
+            if len(heap) < QUALITY_INTERVAL_LIMIT:
+                heapq.heappush(heap, candidate)
+            elif candidate[:2] > heap[0][:2]:
+                heapq.heapreplace(heap, candidate)
+        previous = max(previous, end)
+    warnings = []
+    if audible_count:
+        warnings.append({"code": "audible_untranscribed_audio",
+            "message": f"{audible_count} interval(s) contain audible signal without transcript text. They may contain quiet speech or noise; review the audio."})
+    return {"version": 1,
+        "coverage": {"audioMs": duration, "vadSpeechMs": sum(b - a for a, b in admitted),
+            "recognitionAudioMs": sum(b - a for a, b in chunks) * 1000 // SR,
+            "longestGapMs": longest, "gapCount": total, "audibleGapCount": audible_count,
+            "gapThresholdMs": gap_threshold_ms, "gapsTruncated": total > QUALITY_INTERVAL_LIMIT},
+        "gaps": [entry[2] for entry in sorted(heap, key=lambda entry: entry[1])],
+        "alignment": {"fallbackCount": 0, "estimatedTiming": [], "truncated": False},
+        "warnings": warnings}
 
 
 def _noop(fraction: float, phase: str | None = None) -> None:
@@ -70,11 +148,22 @@ class Engine:
 
     #: Longest piece of audio handed to the recognizer at once.
     max_chunk_s = 30.0
+    #: Prefer speech recall; remains configurable for recordings with persistent background noise.
+    #: Distant/muffled speech can still be rejected, hence independent coverage diagnostics below.
+    vad_threshold = 0.1
 
     def __init__(self, model_id: str, name: str, device: str):
         self.id = model_id
         self.name = name
         self.device = device
+        self._alignment_fallback_count = 0
+        self._alignment_fallbacks: list[dict] = []
+
+    def record_alignment_fallback(self, start_s: float, duration_s: float, reason: str) -> None:
+        self._alignment_fallback_count += 1
+        if len(self._alignment_fallbacks) < QUALITY_INTERVAL_LIMIT:
+            self._alignment_fallbacks.append({"s": round(start_s * 1000),
+                "e": round((start_s + duration_s) * 1000), "reason": reason})
 
     # -- to implement -----------------------------------------------------------------------
 
@@ -112,16 +201,30 @@ class Engine:
         self.load()
         t0 = time.monotonic()
         progress(0.0, "Finding speech")
-        speech = vad.speech_segments(samples, max_speech_s=self.max_chunk_s)
+        speech = vad.speech_segments(samples, threshold=self.vad_threshold, max_speech_s=self.max_chunk_s)
         chunks = vad.make_chunks(speech, max_s=self.max_chunk_s)
         t_vad = time.monotonic() - t0
         progress(0.04, "Transcribing")
         pieces = [samples[a:b] for a, b in chunks]
         t1 = time.monotonic()
+        self._alignment_fallback_count = 0
+        self._alignment_fallbacks = []
         words_per_chunk = self.recognize(pieces, [a / SR for a, _ in chunks], _scaled(progress, 0.04, 0.95), cancelled) if pieces else []
         t_asr = time.monotonic() - t1
-        words = drop_fillers([w for ws in words_per_chunk for w in ws])
+        raw_words = [w for ws in words_per_chunk for w in ws]
+        words = drop_fillers(raw_words)
         segments = build_segments(words)
+        quality = coverage_quality(samples, speech, chunks, raw_words)
+        quality["detector"] = vad.settings(self.vad_threshold, self.max_chunk_s)
+        quality["alignment"] = {"fallbackCount": self._alignment_fallback_count,
+            "estimatedTiming": sorted(self._alignment_fallbacks, key=lambda row: row["s"]),
+            "truncated": self._alignment_fallback_count > len(self._alignment_fallbacks)}
+        if self._alignment_fallback_count:
+            quality["warnings"].append({"code": "estimated_word_timing",
+                "message": f"Word timing was estimated in {self._alignment_fallback_count} audio chunk(s) because forced alignment was unavailable or invalid."})
+            for segment in segments:
+                if any(segment["s"] < a["e"] and segment["e"] > a["s"] for a in self._alignment_fallbacks):
+                    segment["timingEstimated"] = True
         progress(1.0)
         return Result(
             segments=segments,
@@ -130,6 +233,7 @@ class Engine:
             timings={"vad": round(t_vad, 3), "asr": round(t_asr, 3)},
             speech_s=round(sum(b - a for a, b in chunks) / SR, 2),
             chunks=len(chunks),
+            quality=quality,
         )
 
 
